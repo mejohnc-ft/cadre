@@ -31,6 +31,15 @@ import {
  * rediscover, not assume.
  */
 
+export class ComputerNotFoundError extends Error {
+  constructor(container: string) {
+    super(
+      `${container} is not a running computer of this supervisor. Ensure it first.`,
+    );
+    this.name = "ComputerNotFoundError";
+  }
+}
+
 export class AppleContainerUnavailableError extends Error {
   constructor(cause: string) {
     super(
@@ -276,4 +285,40 @@ export async function reset(names: ComputerNames): Promise<boolean> {
   }
   const volume = await run(["volume", "delete", names.profileVolume]);
   return existing !== undefined || volume.code === 0;
+}
+
+/** Run a command in a computer VM as the supervisor. See the Docker module's `exec` for the role. */
+export async function exec(
+  names: ComputerNames,
+  argv: string[],
+  stdin?: Uint8Array,
+): Promise<{ exitCode: number; stdout: Uint8Array; stderr: string }> {
+  const existing = await findOwned(names);
+  if (existing?.status?.state !== "running") {
+    throw new ComputerNotFoundError(names.container);
+  }
+  const proc = Bun.spawn(
+    [
+      "container",
+      "exec",
+      ...(stdin !== undefined ? ["--interactive"] : []),
+      names.container,
+      ...argv,
+    ],
+    {
+      stdin: stdin !== undefined ? "pipe" : "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
+  if (stdin !== undefined && proc.stdin) {
+    proc.stdin.write(stdin);
+    proc.stdin.end();
+  }
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).arrayBuffer(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  return { exitCode, stdout: new Uint8Array(stdout), stderr };
 }

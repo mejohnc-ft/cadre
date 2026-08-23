@@ -1,4 +1,5 @@
 import Docker from "dockerode";
+import { packTar } from "./bundle";
 import {
   BOT_LABEL,
   type ComputerNames,
@@ -95,6 +96,15 @@ export class ComputerNotAnsweringError extends Error {
       `The computer in ${container} started but did not answer within ${timeoutMs}ms. It is not ready, so it is not being handed out.`,
     );
     this.name = "ComputerNotAnsweringError";
+  }
+}
+
+export class ComputerNotFoundError extends Error {
+  constructor(container: string) {
+    super(
+      `${container} is not a running computer of this supervisor. Ensure it first.`,
+    );
+    this.name = "ComputerNotFoundError";
   }
 }
 
@@ -592,4 +602,88 @@ export async function reset(names: ComputerNames): Promise<boolean> {
     }
   }
   return true;
+}
+
+/**
+ * Run a command in a computer, as the supervisor: stdin fed, stdout collected as bytes, stderr as
+ * text. This is the supervisor's own verb — a maintenance channel and the transport for bundles —
+ * not the Bot's `computer_run_command`, which goes through the gateway and is decided and audited.
+ *
+ * Stdin goes in as a file rather than a hijacked socket: docker-modem's hijack path expects the
+ * HTTP 101 upgrade Node hands it, and Bun's fetch does not, so a hijacked exec fails after the
+ * command has already run. Copying the bytes in with the archive API and redirecting from the file
+ * uses only the plain request paths, which work everywhere.
+ */
+export async function exec(
+  names: ComputerNames,
+  argv: string[],
+  stdin?: Uint8Array,
+): Promise<{ exitCode: number; stdout: Uint8Array; stderr: string }> {
+  const owned = await inspectOwned(names);
+  if (!owned) throw new ComputerNotFoundError(names.container);
+  const container = docker.getContainer(names.container);
+
+  let command = argv;
+  let stdinPath: string | undefined;
+  if (stdin !== undefined) {
+    const name = `stdin-${crypto.randomUUID()}`;
+    stdinPath = `/tmp/slice-exec/${name}`;
+    await container
+      .putArchive(Buffer.from(packTar([[name, stdin]])), {
+        path: "/tmp/slice-exec",
+      })
+      .catch(async (error: unknown) => {
+        // The directory may not exist yet; make it and try once more.
+        if (
+          String(error).includes("404") ||
+          String(error).includes("no such")
+        ) {
+          await runPlain(container, ["mkdir", "-p", "/tmp/slice-exec"]);
+          await container.putArchive(Buffer.from(packTar([[name, stdin]])), {
+            path: "/tmp/slice-exec",
+          });
+        } else {
+          throw error;
+        }
+      });
+    command = ["sh", "-c", 'exec "$@" < "$0"', stdinPath, ...argv];
+  }
+
+  try {
+    return await runPlain(container, command);
+  } finally {
+    if (stdinPath) {
+      await runPlain(container, ["rm", "-f", stdinPath]).catch(() => {});
+    }
+  }
+}
+
+async function runPlain(
+  container: Docker.Container,
+  argv: string[],
+): Promise<{ exitCode: number; stdout: Uint8Array; stderr: string }> {
+  const session = await container.exec({
+    Cmd: argv,
+    AttachStdout: true,
+    AttachStderr: true,
+  });
+  const stream = (await session.start({})) as NodeJS.ReadableStream;
+  const { PassThrough } = await import("node:stream");
+  const out = new PassThrough();
+  const err = new PassThrough();
+  const outChunks: Buffer[] = [];
+  const errChunks: Buffer[] = [];
+  out.on("data", (chunk: Buffer) => outChunks.push(chunk));
+  err.on("data", (chunk: Buffer) => errChunks.push(chunk));
+  docker.modem.demuxStream(stream, out, err);
+  await new Promise<void>((resolve, reject) => {
+    stream.on("end", () => resolve());
+    stream.on("error", reject);
+  });
+  const info = await session.inspect();
+  return {
+    exitCode: info.ExitCode ?? 1,
+    stdout: new Uint8Array(Buffer.concat(outChunks)),
+    stderr: Buffer.concat(errChunks).toString("utf8"),
+  };
 }

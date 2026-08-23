@@ -2,15 +2,20 @@ import { serve } from "bun";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import * as apple from "./apple";
-import { AppleContainerUnavailableError } from "./apple";
+import {
+  AppleContainerUnavailableError,
+  ComputerNotFoundError as AppleComputerNotFoundError,
+} from "./apple";
 import * as dockerBackend from "./docker";
 import {
   ComputerNotAnsweringError,
+  ComputerNotFoundError,
   DockerUnavailableError,
   NameHeldError,
 } from "./docker";
 import { registerEntry } from "./identity";
 import { namesFor } from "./names";
+import { exportBundle, importBundle } from "./transfer";
 import {
   admit,
   budgetFromEnvironment,
@@ -71,6 +76,7 @@ const backend =
         reset: apple.reset,
         listOwned: apple.listOwned,
         reachable: apple.reachable,
+        exec: apple.exec,
       }
     : {
         ensure: dockerBackend.ensure,
@@ -78,8 +84,9 @@ const backend =
         reset: dockerBackend.reset,
         listOwned: dockerBackend.listOwned,
         reachable: dockerBackend.reachable,
+        exec: dockerBackend.exec,
       };
-const { ensure, stop, reset, listOwned, reachable } = backend;
+const { ensure, stop, reset, listOwned, reachable, exec } = backend;
 
 const image = process.env.COMPUTER_IMAGE ?? "openbot-agent-computer:latest";
 const network = process.env.COMPUTER_NETWORK;
@@ -139,6 +146,27 @@ app.use("*", async (context, next) => {
   }
   return next();
 });
+
+/** The 503 every verb answers with when the runtime is not there; anything else is a bug. */
+function unavailable(context: Context, error: unknown) {
+  if (
+    error instanceof DockerUnavailableError ||
+    error instanceof AppleContainerUnavailableError ||
+    error instanceof ComputerNotAnsweringError
+  ) {
+    return context.json({ error: error.message }, 503);
+  }
+  if (error instanceof NameHeldError) {
+    return context.json({ error: error.message }, 409);
+  }
+  if (
+    error instanceof ComputerNotFoundError ||
+    error instanceof AppleComputerNotFoundError
+  ) {
+    return context.json({ error: error.message }, 404);
+  }
+  throw error;
+}
 
 const health = async (context: Context) =>
   context.json({
@@ -293,6 +321,75 @@ computers.post("/computers/:botId/reset", async (context) => {
       return context.json({ error: error.message }, 503);
     }
     throw error;
+  }
+});
+
+/**
+ * The supervisor's own command channel into a computer. Token-guarded like every verb; not the
+ * path a Bot's commands take, which is the gateway.
+ */
+computers.post("/computers/:botId/exec", async (context) => {
+  const parsed = resolve(context.req.param("botId"));
+  if (!parsed.ok) return context.json({ error: parsed.reason }, 400);
+  const body = (await context.req.json().catch(() => null)) as {
+    argv?: unknown;
+    stdin?: unknown;
+  } | null;
+  const argv = Array.isArray(body?.argv)
+    ? body.argv.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  if (argv.length === 0) {
+    return context.json({ error: "argv must be a non-empty array." }, 400);
+  }
+  try {
+    const result = await exec(
+      parsed.names,
+      argv,
+      typeof body?.stdin === "string"
+        ? new TextEncoder().encode(body.stdin)
+        : undefined,
+    );
+    return context.json({
+      exitCode: result.exitCode,
+      stdout: new TextDecoder().decode(result.stdout),
+      stderr: result.stderr,
+    });
+  } catch (error) {
+    return unavailable(context, error);
+  }
+});
+
+/** The computer's workspace and browser profile, as one archive. The migration primitive. */
+computers.get("/computers/:botId/bundle", async (context) => {
+  const parsed = resolve(context.req.param("botId"));
+  if (!parsed.ok) return context.json({ error: parsed.reason }, 400);
+  try {
+    const bundle = await exportBundle(exec, parsed.names);
+    const body = bundle.buffer.slice(
+      bundle.byteOffset,
+      bundle.byteOffset + bundle.byteLength,
+    ) as ArrayBuffer;
+    return new Response(body, {
+      headers: {
+        "content-type": "application/x-tar",
+        "content-disposition": `attachment; filename="${parsed.names.botId}.bundle.tar"`,
+      },
+    });
+  } catch (error) {
+    return unavailable(context, error);
+  }
+});
+
+/** Restore a bundle into an existing computer. Its files land where they were on the source. */
+computers.post("/computers/:botId/bundle", async (context) => {
+  const parsed = resolve(context.req.param("botId"));
+  if (!parsed.ok) return context.json({ error: parsed.reason }, 400);
+  try {
+    const bundle = new Uint8Array(await context.req.arrayBuffer());
+    await importBundle(exec, parsed.names, bundle);
+    return context.json({ restored: true, bytes: bundle.byteLength });
+  } catch (error) {
+    return unavailable(context, error);
   }
 });
 
