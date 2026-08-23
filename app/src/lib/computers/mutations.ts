@@ -45,3 +45,59 @@ export function saveActionPolicyMutationOptions(queryClient: QueryClient) {
     onSuccess: () => invalidateComputers(queryClient),
   });
 }
+
+export function mintEnrollmentTokenMutationOptions() {
+  return mutationOptions({
+    mutationFn: (): Promise<{ token: string; expiresAt: string }> =>
+      client("/api/admin/nodes/enrollment-tokens", {
+        method: "POST",
+        fallback: "An enrollment token could not be minted.",
+      }).then((response) => response.json()),
+  });
+}
+
+export function setNodePlacementMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (variables: {
+      nodeId: string;
+      placementEnabled: boolean;
+    }) => {
+      await client(`/api/admin/nodes/${encodeURIComponent(variables.nodeId)}`, {
+        method: "PATCH",
+        body: { placementEnabled: variables.placementEnabled },
+        fallback: "The node could not be updated.",
+      });
+    },
+    onSuccess: () => invalidateComputers(queryClient),
+  });
+}
+
+export function removeNodeMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (nodeId: string) => {
+      await client(`/api/admin/nodes/${encodeURIComponent(nodeId)}`, {
+        method: "DELETE",
+        fallback: "The node could not be removed.",
+      });
+    },
+    onSuccess: () => invalidateComputers(queryClient),
+  });
+}
+
+export function moveComputerMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (variables: {
+      botId: string;
+      nodeId: string;
+    }): Promise<{ from: string; to: string; bytes: number }> =>
+      client(
+        `/api/admin/computers/${encodeURIComponent(variables.botId)}/move`,
+        {
+          method: "POST",
+          body: { nodeId: variables.nodeId },
+          fallback: "The computer could not be moved.",
+        },
+      ).then((response) => response.json()),
+    onSuccess: () => invalidateComputers(queryClient),
+  });
+}

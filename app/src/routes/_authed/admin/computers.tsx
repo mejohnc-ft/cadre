@@ -25,9 +25,29 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { useBotNames } from "@/lib/agents/bot-names";
-import { setComputerStateMutationOptions } from "@/lib/computers/mutations";
-import { computerFleetQueryOptions } from "@/lib/computers/queries";
+import {
+  mintEnrollmentTokenMutationOptions,
+  moveComputerMutationOptions,
+  removeNodeMutationOptions,
+  setComputerStateMutationOptions,
+  setNodePlacementMutationOptions,
+} from "@/lib/computers/mutations";
+import {
+  computerFleetQueryOptions,
+  type MeshNode,
+  meshNodesQueryOptions,
+  placementsQueryOptions,
+} from "@/lib/computers/queries";
 import { queryClient } from "@/query-client";
 
 export const Route = createFileRoute("/_authed/admin/computers")({
@@ -43,6 +63,38 @@ function ComputersPage() {
 
   const fleet = useQuery(computerFleetQueryOptions());
   const setState = useMutation(setComputerStateMutationOptions(queryClient));
+  const nodes = useQuery(meshNodesQueryOptions());
+  const placements = useQuery(placementsQueryOptions());
+  const move = useMutation(moveComputerMutationOptions(queryClient));
+  const mint = useMutation(mintEnrollmentTokenMutationOptions());
+  const setPlacement = useMutation(
+    setNodePlacementMutationOptions(queryClient),
+  );
+  const removeNode = useMutation(removeNodeMutationOptions(queryClient));
+  const [minted, setMinted] = useState<{
+    token: string;
+    expiresAt: string;
+  } | null>(null);
+  const [moving, setMoving] = useState<string | null>(null);
+  const [moveProblem, setMoveProblem] = useState<string | null>(null);
+
+  const nodeList = nodes.data ?? [];
+  const placementOf = (botId: string) =>
+    placements.data?.find((placed) => placed.botId === botId)?.node ?? "local";
+  const nodeName = (id: string) =>
+    nodeList.find((node) => node.id === id)?.name ?? id;
+
+  const moveTo = (botId: string, nodeId: string) => {
+    setMoving(botId);
+    setMoveProblem(null);
+    move.mutate(
+      { botId, nodeId },
+      {
+        onError: (error) => setMoveProblem(error.message),
+        onSettled: () => setMoving(null),
+      },
+    );
+  };
 
   const computers = fleet.data?.computers ?? null;
   const isolation = fleet.data?.isolation ?? null;
@@ -92,6 +144,54 @@ function ComputersPage() {
         </p>
       ) : null}
 
+      <PageSection
+        action={
+          <Button
+            disabled={mint.isPending}
+            onClick={() =>
+              mint.mutate(undefined, { onSuccess: (token) => setMinted(token) })
+            }
+            size="sm"
+            variant="outline"
+          >
+            {mint.isPending ? "Minting…" : "Add a machine"}
+          </Button>
+        }
+        title="Machines"
+      >
+        {nodes.error ? (
+          <PageEmpty>The machines could not be listed.</PageEmpty>
+        ) : nodeList.length === 0 ? null : (
+          <PageRows>
+            {nodeList.map((node, index) => (
+              <StaggerItem index={index} key={node.id}>
+                <NodeRow
+                  busy={setPlacement.isPending || removeNode.isPending}
+                  node={node}
+                  onRemove={() => removeNode.mutate(node.id)}
+                  onTogglePlacement={(enabled) =>
+                    setPlacement.mutate({
+                      nodeId: node.id,
+                      placementEnabled: enabled,
+                    })
+                  }
+                />
+                {index !== nodeList.length - 1 && <Separator />}
+              </StaggerItem>
+            ))}
+          </PageRows>
+        )}
+      </PageSection>
+
+      {moveProblem ? (
+        <p
+          className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
+          role="alert"
+        >
+          {moveProblem}
+        </p>
+      ) : null}
+
       <PageSection title="Computers in this deployment">
         {computers === null && problem ? (
           <PageEmpty>The list could not be loaded.</PageEmpty>
@@ -121,6 +221,41 @@ function ComputersPage() {
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>
+                    {nodeList.length > 1 ? (
+                      <Select
+                        disabled={moving === computer.botId}
+                        onValueChange={(nodeId) => {
+                          if (nodeId) moveTo(computer.botId, nodeId);
+                        }}
+                        value={placementOf(computer.botId)}
+                      >
+                        <SelectTrigger
+                          aria-label="Where this computer runs"
+                          size="sm"
+                        >
+                          <SelectValue>
+                            {moving === computer.botId
+                              ? "Moving…"
+                              : `On ${nodeName(placementOf(computer.botId))}`}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            {nodeList.map((node) => (
+                              <SelectItem
+                                disabled={
+                                  !node.placementEnabled || !node.reachable
+                                }
+                                key={node.id}
+                                value={node.id}
+                              >
+                                {node.name}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    ) : null}
                     <Button
                       disabled={busy === computer.botId || !computer.running}
                       onClick={() => void run(computer.botId, "stop")}
@@ -152,6 +287,31 @@ function ComputersPage() {
        * identical-looking rows. The dialog names the Bot, so the sentence somebody agrees to says
        * which computer it destroys.
        */}
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open) setMinted(null);
+        }}
+        open={minted !== null}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add a machine</DialogTitle>
+            <DialogDescription>
+              On the machine joining, after <code>scripts/install-node.sh</code>
+              , run this within 30 minutes. The token works once.
+            </DialogDescription>
+          </DialogHeader>
+          <pre className="overflow-x-auto rounded-md bg-muted px-3 py-2 text-xs">
+            {`slice node join ${window.location.origin} ${minted?.token ?? ""} \\\n  --supervisor-url http://<its tailnet ip>:4600 --backend docker`}
+          </pre>
+          <DialogFooter>
+            <Button onClick={() => setMinted(null)} size="sm" variant="ghost">
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog
         onOpenChange={(open) => {
           if (!open) setConfirming(null);
@@ -201,5 +361,59 @@ function ComputersPage() {
         .
       </p>
     </PageShell>
+  );
+}
+
+function gib(bytes: number | undefined) {
+  return bytes === undefined ? "∞" : `${(bytes / 1024 ** 3).toFixed(0)}`;
+}
+
+function NodeRow({
+  node,
+  busy,
+  onTogglePlacement,
+  onRemove,
+}: {
+  node: MeshNode;
+  busy: boolean;
+  onTogglePlacement: (enabled: boolean) => void;
+  onRemove: () => void;
+}) {
+  const used = node.capacity?.used;
+  const budget = node.capacity?.budget;
+  const detail = !node.reachable
+    ? `Unreachable${node.error ? `: ${node.error}` : ""}`
+    : used
+      ? `${used.cpus}/${budget?.cpus ?? "∞"} cores · ${(used.memoryBytes / 1024 ** 3).toFixed(1)}/${gib(budget?.memoryBytes)} GiB · ${node.capacity?.computers?.length ?? 0} computer(s) · ${node.backend}`
+      : `Reachable · ${node.backend}`;
+  return (
+    <Item size="sm">
+      <ItemContent>
+        <ItemTitle title={node.id}>{node.name}</ItemTitle>
+        <ItemDescription>{detail}</ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        {node.id === "local" ? null : (
+          <>
+            <label className="flex items-center gap-2 text-muted-foreground text-xs">
+              <Switch
+                checked={node.placementEnabled}
+                disabled={busy}
+                onCheckedChange={onTogglePlacement}
+              />
+              Accepts new computers
+            </label>
+            <Button
+              disabled={busy}
+              onClick={onRemove}
+              size="sm"
+              variant="outline"
+            >
+              Remove
+            </Button>
+          </>
+        )}
+      </ItemActions>
+    </Item>
   );
 }

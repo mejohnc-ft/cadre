@@ -38,7 +38,53 @@ export const computerKeys = {
   all: ["computers"] as const,
   fleet: () => ["computers", "fleet"] as const,
   policy: () => ["computers", "policy"] as const,
+  nodes: () => ["computers", "nodes"] as const,
+  placements: () => ["computers", "placements"] as const,
 };
+
+/** One machine in the mesh, with what its supervisor reported when asked just now. */
+export type MeshNode = {
+  id: string;
+  name: string;
+  backend: string;
+  placementEnabled: boolean;
+  reachable: boolean;
+  capacity: {
+    budget?: { cpus?: number; memoryBytes?: number };
+    used?: { cpus: number; memoryBytes: number };
+    available?: { cpus: number | null; memoryBytes: number | null };
+    computers?: Array<{ botId: string; status: string }>;
+  } | null;
+  error?: string;
+};
+
+export type PlacedComputer = {
+  botId: string;
+  status: "running" | "stopped";
+  node: string;
+  startedAt?: string;
+};
+
+export function meshNodesQueryOptions() {
+  return queryOptions({
+    queryKey: computerKeys.nodes(),
+    queryFn: (): Promise<MeshNode[]> =>
+      client("/api/admin/nodes", "nodes", {
+        fallback: "The nodes could not be listed.",
+      }),
+    refetchInterval: 15_000,
+  });
+}
+
+export function placementsQueryOptions() {
+  return queryOptions({
+    queryKey: computerKeys.placements(),
+    queryFn: (): Promise<PlacedComputer[]> =>
+      client("/api/admin/computers/placements", "computers", {
+        fallback: "The placements could not be listed.",
+      }),
+  });
+}
 
 /**
  * The deployment-wide fleet route.

@@ -413,8 +413,13 @@ computers.get("/computers", async (context) => {
 app.route("/", computers);
 app.route("/v1", computers);
 
-serve({ port, fetch: app.fetch, idleTimeout: 120 });
+/**
+ * Where to listen. Loopback for a supervisor beside its server; a node sets HOST to its tailnet
+ * address so the deployment's server can reach it and the rest of the network cannot.
+ */
+const hostname = process.env.HOST?.trim() || "127.0.0.1";
+serve({ port, hostname, fetch: app.fetch, idleTimeout: 120 });
 
 console.info(
-  `Supervisor listening on http://localhost:${port} (image ${image}${runtime ? `, runtime ${runtime}` : ""})`,
+  `Supervisor listening on http://${hostname}:${port} (backend ${backendName}, image ${image}${runtime ? `, runtime ${runtime}` : ""})`,
 );

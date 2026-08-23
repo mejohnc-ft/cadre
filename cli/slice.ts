@@ -579,6 +579,7 @@ async function nodeJoin(args: string[]) {
       id: { type: "string" },
       name: { type: "string" },
       backend: { type: "string", default: "apple" },
+      "supervisor-token": { type: "string" },
     },
   });
   const [server, token] = positionals;
@@ -587,7 +588,16 @@ async function nodeJoin(args: string[]) {
       "Usage: slice node join <server-url> <token> --supervisor-url <url> [--id slug] [--name text] [--backend apple|docker]",
     );
   }
-  const env = loadEnv();
+  // Run on the node, the supervisor token is this machine's own; run from the server on a node's
+  // behalf, it is passed in. Either way it goes to the server once and is stored encrypted there.
+  const supervisorToken =
+    values["supervisor-token"] ??
+    (existsSync(ENV_FILE) ? loadEnv().SUPERVISOR_TOKEN : undefined);
+  if (!supervisorToken) {
+    fail(
+      "--supervisor-token is required when this machine has no ~/.slice/slice.env.",
+    );
+  }
   const supervisorUrl = values["supervisor-url"];
   if (!supervisorUrl)
     fail(
@@ -610,7 +620,7 @@ async function nodeJoin(args: string[]) {
         id,
         name: values.name ?? id,
         supervisorUrl,
-        supervisorToken: env.SUPERVISOR_TOKEN,
+        supervisorToken,
         backend: values.backend,
       }),
     },

@@ -87,9 +87,14 @@ A deployment is one server and any number of nodes. A node is a machine running 
 slice node token                     # prints a single-use token, valid 30 minutes
 slice nodes                          # every node with live capacity
 
-# On the machine joining (its supervisor must publish on its tailnet address):
-COMPUTER_PUBLISH_HOST=<its tailnet ip> slice up
-slice node join http://<server>:3001 <token> --supervisor-url http://<its tailnet ip>:4600 --backend docker
+# On a Linux machine joining (Ubuntu/Debian with Docker; rsync the repo there first):
+scripts/install-node.sh --computer-token <COMPUTER_TOKEN from the server's ~/.slice/slice.env> --cpus 8 --memory-gb 32
+# It builds the computer image, writes ~/.slice/node.env, and runs the supervisor as a
+# `systemd --user` unit bound to the machine's tailnet address only. It prints the join command.
+
+# Enrol it — from the node (it POSTs to the server), or from the server on its behalf:
+slice node join http://127.0.0.1:3001 <token> --id ai --supervisor-url http://<its tailnet ip>:4600 \
+  --supervisor-token '<SUPERVISOR_TOKEN from the node's ~/.slice/node.env>' --backend docker
 
 # Back on the server: carry a Bot's computer — workspace and browser profile — to a node.
 slice move general-assistant <node-id>
