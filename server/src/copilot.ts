@@ -1,6 +1,10 @@
 import type { BaseEvent, RunAgentInput } from "@ag-ui/client";
 import { AbstractAgent, HttpAgent } from "@ag-ui/client";
-import type { BuiltInAgentConfiguration } from "@copilotkit/runtime/v2";
+import { createOpenAI } from "@ai-sdk/openai";
+import type {
+  BuiltInAgentClassicConfig,
+  BuiltInAgentConfiguration,
+} from "@copilotkit/runtime/v2";
 import type { AgentRunner } from "@copilotkit/runtime/v2";
 import { BuiltInAgent, CopilotSseRuntime } from "@copilotkit/runtime/v2";
 import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
@@ -40,6 +44,33 @@ import { grantedToolGuidance } from "./plugins/tools";
 export type IdentifyUser = (
   request: Request,
 ) => Promise<{ id: string; name: string }>;
+
+/**
+ * Which model a built-in Bot speaks to.
+ *
+ * The runtime resolves `"openai/<model>"` itself, but through OpenAI's Responses API, which only
+ * OpenAI serves. Every OpenAI-compatible provider — Z.ai, OpenRouter, a vLLM or Ollama box, a
+ * corporate gateway — speaks `/chat/completions` and nothing else, so a deployment that set
+ * `OPENAI_BASE_URL` to one of those 404'd on the first turn. When the base URL points anywhere but
+ * OpenAI, the model is built here on the chat-completions path; otherwise the runtime's own
+ * resolution stands and nothing changes for a stock deployment.
+ */
+function languageModel(
+  model: RuntimeModel,
+  apiKey: string,
+): BuiltInAgentClassicConfig["model"] {
+  const baseURL = process.env.OPENAI_BASE_URL?.trim();
+  const compatible =
+    model.provider === "openai" &&
+    baseURL &&
+    !/^https:\/\/api\.openai\.com(\/|$)/.test(baseURL);
+  if (!compatible) return `${model.provider}/${model.defaultModel}`;
+  // The runtime's `LanguageModel` is the `ai` package's; the provider returns the same object
+  // through `@ai-sdk/provider`, and the two copies in the tree disagree only on the type name.
+  return createOpenAI({ apiKey, baseURL }).chat(
+    model.defaultModel,
+  ) as unknown as BuiltInAgentClassicConfig["model"];
+}
 
 type RegisteredBuiltInAgent = {
   id: string;
@@ -223,7 +254,7 @@ export function builtInAgentConfiguration(
   }
 
   return {
-    model: `${model.provider}/${model.defaultModel}`,
+    model: languageModel(model, apiKey),
     /*
      * The package's role, then what this Bot actually holds, then the computer.
      *
@@ -801,23 +832,52 @@ export function createRequestAgents(
     // Agents are built per request, so each instance belongs to exactly one person. The runner is
     // handed the agent and not the request; this is how it learns whose thread it is writing.
     for (const agent of Object.values(agents)) {
-      if (agent && typeof agent === "object") {
-        AGENT_ACTOR.set(agent as object, actor.id);
-      }
+      // Duck-typed: the runtime's Bots come from its own copy of @ag-ui/client, so `instanceof`
+      // against this package's AbstractAgent is false for exactly the agents that matter.
+      if (isTaggable(agent)) tagActor(agent, actor.id);
     }
     return agents;
   };
 }
 
 /**
- * Which person a per-request agent instance was built for. Keyed by the instance, so it is read
- * by the runner from the `agent` it is given and never from anything a Bot could influence.
+ * The person a per-request agent instance was built for, carried as a middleware that does nothing.
+ *
+ * A middleware rather than a side table because the runtime clones the agent before every run
+ * and a clone keeps only what the agent's own `clone` copies: `BuiltInAgent` rebuilds from its
+ * config and copies `middlewares`; `HttpAgent` copies `middlewares` and `subscribers`. The
+ * middleware list is the one thing both carry. It is read by the runner from the agent it is
+ * given and never from anything a Bot could influence.
  */
-export const AGENT_ACTOR = new WeakMap<object, string>();
+class ActorTag {
+  constructor(readonly actorId: string) {}
+  run(input: unknown, next: { run: (input: unknown) => unknown }) {
+    return next.run(input);
+  }
+}
+
+type Taggable = {
+  use: (...middlewares: unknown[]) => unknown;
+  middlewares?: unknown[];
+};
+
+function isTaggable(value: unknown): value is Taggable {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as Taggable).use === "function"
+  );
+}
+
+function tagActor(agent: Taggable, actorId: string) {
+  agent.use(new ActorTag(actorId));
+}
 
 /** The runner's `userFor`: the actor the agent instance was built for, or "" for none. */
 export function actorForAgent(agent: object): string {
-  return AGENT_ACTOR.get(agent) ?? "";
+  const middlewares = (agent as Taggable).middlewares;
+  const tag = middlewares?.find((entry) => entry instanceof ActorTag);
+  return tag instanceof ActorTag ? tag.actorId : "";
 }
 
 /**
@@ -853,7 +913,7 @@ export function mountCopilotRuntime(
   }
 
   // `identifyUser` has no slot in SSE mode; the runner learns whose thread a run is from the
-  // per-request agent instance (see AGENT_ACTOR), and app.ts scopes the runtime's own /threads
+  // per-request agent instance (see ActorTag), and app.ts scopes the runtime's own /threads
   // endpoints to the caller. The parameter stays so the call site reads as the attribution it is.
   void identifyUser;
   const runtime = new CopilotSseRuntime({

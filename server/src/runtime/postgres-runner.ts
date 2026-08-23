@@ -496,13 +496,21 @@ export class PostgresAgentRunner
 
   // ---- Slice additions -------------------------------------------------------------------------
 
-  /** Whether a thread exists for this person. The thread-status route's question. */
+  /**
+   * Whether a thread exists for this person. The thread-status route's question, and the
+   * ownership guard's in front of the runtime's own thread endpoints.
+   *
+   * A yes also loads the thread: those endpoints read through the synchronous getters next, and
+   * this is the one async step that runs before them.
+   */
   async hasThread(threadId: string, userId: string): Promise<boolean> {
     const [row] = await this.db
       .select({ userId: threads.userId })
       .from(threads)
       .where(eq(threads.id, threadId))
       .limit(1);
-    return row !== undefined && row.userId === userId;
+    const owned = row !== undefined && row.userId === userId;
+    if (owned) await this.hydrate(threadId);
+    return owned;
   }
 }
