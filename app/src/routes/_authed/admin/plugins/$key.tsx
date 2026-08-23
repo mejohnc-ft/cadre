@@ -419,7 +419,7 @@ function RouteComponent() {
               <p className="text-muted-foreground text-sm">
                 Add this to the client's authorised redirect URIs at the vendor,
                 exactly as written. A single wrong character fails there, with a
-                message that does not mention OpenBot.
+                message that does not mention Slice.
               </p>
               {plugins.data?.redirectUri ? (
                 /* Selectable and monospaced: it is copied by hand into somebody else's console. */

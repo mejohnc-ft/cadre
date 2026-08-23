@@ -289,7 +289,7 @@ describe("tenant YAML validation", () => {
       new URL("../../examples/fintech", import.meta.url).pathname,
     );
 
-    expect(tenantPackage.tenantId).toBe("openbot");
+    expect(tenantPackage.tenantId).toBe("slice");
     expect(tenantPackage.stylesheet).toBeNull();
     expect(tenantPackage.themeCss).toBe("");
     expect(tenantPackage.checksum).toMatch(/^[a-f0-9]{64}$/);

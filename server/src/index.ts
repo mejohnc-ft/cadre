@@ -31,7 +31,7 @@ import {
   describeComputerIsolation,
 } from "./computer/provider";
 import { createSnapshotStore } from "./computer/snapshot-store";
-import { bindAddress, loadConfig } from "./config";
+import { bindAddresses, loadConfig } from "./config";
 import { PostgresAgentRunner } from "./runtime/postgres-runner";
 import {
   actorForAgent,
@@ -116,7 +116,7 @@ const identifyActor: IdentifyActor = async (request) => {
 
 const config = loadConfig();
 const port = Number.parseInt(process.env.PORT ?? "3001", 10);
-const hostname = bindAddress(process.env.HOST, config.singleUser);
+const hostnames = bindAddresses(process.env.HOST, config.singleUser);
 const database = createDatabase(config.databaseUrl);
 await initializeDevActorUser(database, config.singleUser);
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
@@ -583,9 +583,8 @@ const isProxiedStream = (data: SocketData): data is StreamData =>
 const asChannelSocket = (ws: { data: SocketData }) =>
   ws as unknown as ChannelSocket;
 
-serve<SocketData>({
+const serverOptions: Parameters<typeof serve<SocketData>>[0] = {
   port,
-  hostname,
   async fetch(request, server) {
     const url = new URL(request.url);
     const streamBotId = streamPathBotId(url.pathname);
@@ -682,7 +681,14 @@ serve<SocketData>({
       ws.data.inward?.close();
     },
   },
-});
+};
+
+// One listener per address. Bun binds exactly one hostname per `serve`, and loopback is two of
+// them: `localhost` resolves to ::1 on this platform and to 127.0.0.1 on others, and a single-user
+// deployment has to answer both while reaching neither the LAN nor the tailnet.
+for (const hostname of hostnames) {
+  serve<SocketData>({ ...serverOptions, hostname });
+}
 
 if (config.singleUser) {
   // Loud, every boot. A server that is not checking who is asking should never be a quiet default.

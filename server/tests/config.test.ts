@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-  bindAddress,
+  bindAddresses,
   configuredAuthProviders,
   loadConfig,
 } from "../src/config";
@@ -432,23 +432,24 @@ describe("accessibility", () => {
   );
 });
 
-describe("bind address", () => {
-  test("single-user mode binds loopback by default", () => {
-    expect(bindAddress(undefined, true)).toBe("127.0.0.1");
-    expect(bindAddress("::1", true)).toBe("::1");
+describe("bind addresses", () => {
+  test("single-user mode binds both loopback addresses by default", () => {
+    expect(bindAddresses(undefined, true)).toEqual(["127.0.0.1", "::1"]);
+    expect(bindAddresses("localhost", true)).toEqual(["127.0.0.1", "::1"]);
+    expect(bindAddresses("::1", true)).toEqual(["::1"]);
   });
 
   test("single-user mode refuses any other interface", () => {
-    expect(() => bindAddress("0.0.0.0", true)).toThrow(
+    expect(() => bindAddresses("0.0.0.0", true)).toThrow(
       "may only bind loopback",
     );
-    expect(() => bindAddress("100.64.0.5", true)).toThrow(
+    expect(() => bindAddresses("100.64.0.5", true)).toThrow(
       "may only bind loopback",
     );
   });
 
   test("with sign-in, every interface is the default and any host is allowed", () => {
-    expect(bindAddress(undefined, false)).toBe("0.0.0.0");
-    expect(bindAddress("100.64.0.5", false)).toBe("100.64.0.5");
+    expect(bindAddresses(undefined, false)).toEqual(["0.0.0.0"]);
+    expect(bindAddresses("100.64.0.5", false)).toEqual(["100.64.0.5"]);
   });
 });

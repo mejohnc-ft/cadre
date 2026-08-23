@@ -625,19 +625,22 @@ const LOOPBACK = new Set(["127.0.0.1", "::1", "localhost"]);
  * Where the server listens.
  *
  * Single-user mode admits every request as the administrator, so it is only ever safe on an
- * interface nothing else can reach. Unset, it binds loopback; set to anything else, the server
- * refuses to start rather than serve an open deployment. With sign-in configured the default is
- * every interface, which is what a server on a tailnet wants.
+ * interface nothing else can reach. Unset, it binds both loopback addresses; set to anything that
+ * is not loopback, the server refuses to start rather than serve an open deployment. With sign-in
+ * configured the default is every interface, which is what a server on a tailnet wants.
  */
-export function bindAddress(
+export function bindAddresses(
   requested: string | undefined,
   singleUser: boolean,
-): string {
-  const host = requested?.trim() || (singleUser ? "127.0.0.1" : "0.0.0.0");
-  if (singleUser && !LOOPBACK.has(host)) {
-    throw new Error(
-      `OPENBOT_SINGLE_USER=true admits every visitor as the administrator and may only bind loopback, not HOST=${host}. Configure sign-in to listen on other interfaces.`,
-    );
+): string[] {
+  const host = requested?.trim();
+  if (singleUser) {
+    if (host && !LOOPBACK.has(host)) {
+      throw new Error(
+        `OPENBOT_SINGLE_USER=true admits every visitor as the administrator and may only bind loopback, not HOST=${host}. Configure sign-in to listen on other interfaces.`,
+      );
+    }
+    return !host || host === "localhost" ? ["127.0.0.1", "::1"] : [host];
   }
-  return host;
+  return [host || "0.0.0.0"];
 }

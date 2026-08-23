@@ -91,7 +91,7 @@ function CredentialsPage() {
           Add credential
         </Button>
       }
-      description="Credentials are write-only. OpenBot never displays their secret values."
+      description="Credentials are write-only. Slice never displays their secret values."
       title="Credentials"
     >
       {/*
