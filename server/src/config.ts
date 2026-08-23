@@ -632,15 +632,35 @@ const LOOPBACK = new Set(["127.0.0.1", "::1", "localhost"]);
 export function bindAddresses(
   requested: string | undefined,
   singleUser: boolean,
+  extraBinds: string | undefined = undefined,
 ): string[] {
   const host = requested?.trim();
+  /*
+   * Addresses the computers reach this server on: the VM bridge on a Mac (192.168.64.1), docker0
+   * on Linux (172.17.0.1). Named explicitly in OPENBOT_COMPUTER_BIND rather than inferred, because
+   * a single-user server on any other interface is an open deployment. They must be private
+   * (RFC 1918); a tailnet or public address here is refused.
+   */
+  const extras = (extraBinds ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  for (const extra of extras) {
+    if (!/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(extra)) {
+      throw new Error(
+        `OPENBOT_COMPUTER_BIND names the interfaces computers reach this server on and must be a private address, not ${extra}.`,
+      );
+    }
+  }
   if (singleUser) {
     if (host && !LOOPBACK.has(host)) {
       throw new Error(
         `OPENBOT_SINGLE_USER=true admits every visitor as the administrator and may only bind loopback, not HOST=${host}. Configure sign-in to listen on other interfaces.`,
       );
     }
-    return !host || host === "localhost" ? ["127.0.0.1", "::1"] : [host];
+    const loopback =
+      !host || host === "localhost" ? ["127.0.0.1", "::1"] : [host];
+    return [...loopback, ...extras];
   }
-  return [host || "0.0.0.0"];
+  return [host || "0.0.0.0", ...extras];
 }

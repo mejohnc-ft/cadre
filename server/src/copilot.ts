@@ -81,6 +81,11 @@ type RegisteredRemoteAgent = {
   type: "remote_ag_ui";
   endpoint: string;
   standingMessage: StandingRoleMessage;
+  /**
+   * A managed harness inside the Bot's own computer — "claude-code" — rather than an endpoint
+   * somebody runs. The endpoint is resolved at run time from wherever that computer is.
+   */
+  harness?: string;
   /** The key this agent sits behind, resolved from the vault at load time. Never logged. */
   headers?: Record<string, string>;
 };
@@ -184,6 +189,17 @@ export function registeredAgentFromRow(
       : null;
   }
 
+  const harness = configuration?.harness;
+  if (typeof harness === "string" && harness.trim()) {
+    return {
+      id: row.id,
+      name: row.name,
+      type: "remote_ag_ui",
+      endpoint: `harness://${harness.trim()}`,
+      harness: harness.trim(),
+      standingMessage: standingRoleMessage(row),
+    };
+  }
   const endpoint = configuration?.endpoint;
   return typeof endpoint === "string" && isHttpUrl(endpoint)
     ? {
@@ -195,6 +211,17 @@ export function registeredAgentFromRow(
       }
     : null;
 }
+
+/**
+ * How a managed harness is reached: where the Bot's computer is right now, and the computer
+ * secret. Resolved per run, never per roster listing, so listing coworkers starts no computers.
+ */
+type PlainFetch = (url: string, init: RequestInit) => Promise<Response>;
+
+export type HarnessRuntime = {
+  locate: (botId: string) => Promise<string>;
+  computerToken?: string;
+};
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -324,6 +351,7 @@ export async function buildAgents(
   loadVendors: () => Promise<readonly string[]> = async () => [],
   /** How a run's tools are narrowed to what it is about. Absent means they are not. */
   selection?: ToolSelection,
+  harnessRuntime?: HarnessRuntime,
 ): Promise<Record<string, AbstractAgent>> {
   const vendors = await loadVendors().catch(() => [] as readonly string[]);
   return Object.fromEntries(
@@ -340,6 +368,7 @@ export async function buildAgents(
           computerGuidance,
           vendors,
           selection,
+          harnessRuntime,
         ),
       ]),
     ),
@@ -356,6 +385,7 @@ async function buildAgent(
   computerGuidance?: string,
   connectedVendors: readonly string[] = [],
   selection?: ToolSelection,
+  harnessRuntime?: HarnessRuntime,
 ): Promise<AbstractAgent> {
   if (agent.type === "unavailable") {
     return new UnavailableAgent(agent);
@@ -412,6 +442,7 @@ async function buildAgent(
       signRun,
       connectedVendors,
       narrowing ? offeredFor : undefined,
+      harnessRuntime,
     );
   }
 
@@ -506,16 +537,35 @@ function remoteAgentWithStandingRole(
    * Absent means no narrowing, which is the behaviour every deployment had before this existed.
    */
   narrow?: (input: RunAgentInput) => Promise<GrantedTool[]>,
+  harnessRuntime?: HarnessRuntime,
 ) {
+  const watched: PlainFetch = stallGuard
+    ? stallGuard.watch({ id: agent.id, name: agent.name })
+    : (url, init) => fetch(url, init);
+  /*
+   * A harness has no fixed address: its computer may be on this machine, on a node, or not yet
+   * started. The URL is looked up when the run is sent, on the same fetch the stall guard
+   * watches, and the request carries the computer secret and the Bot it is for.
+   */
+  const harnessFetch: PlainFetch = async (_url, init) => {
+    if (!harnessRuntime) {
+      throw new Error(
+        `${agent.name} runs a managed harness, but this deployment has no computers to run it in.`,
+      );
+    }
+    const base = (await harnessRuntime.locate(agent.id)).replace(/\/$/, "");
+    const headers = new Headers(init?.headers ?? {});
+    if (harnessRuntime.computerToken) {
+      headers.set("x-openbot-computer-token", harnessRuntime.computerToken);
+    }
+    headers.set("x-openbot-bot-id", agent.id);
+    return watched(`${base}/harness/run`, { ...init, headers });
+  };
   const remote = new HttpAgent({
     url: agent.endpoint,
     agentId: agent.id,
-    // The customer's own key, if their agent sits behind one. `HttpAgentConfig` is
-    // `{ url, headers?, fetch? }`, verified against @ag-ui/client 0.0.57.
     ...(agent.headers ? { headers: agent.headers } : {}),
-    ...(stallGuard
-      ? { fetch: stallGuard.watch({ id: agent.id, name: agent.name }) }
-      : {}),
+    fetch: agent.harness ? harnessFetch : watched,
   });
   /*
    * What this Bot holds, as a second standing message.
@@ -739,6 +789,7 @@ export async function resolveRuntimeAgents(
   computerGuidance?: string,
   loadVendors?: () => Promise<readonly string[]>,
   selection?: ToolSelection,
+  harnessRuntime?: HarnessRuntime,
 ): Promise<Record<string, AbstractAgent>> {
   const registered = await loadAgents();
   if (registered.length === 0) {
@@ -760,6 +811,7 @@ export async function resolveRuntimeAgents(
     computerGuidance,
     loadVendors,
     selection,
+    harnessRuntime,
   );
 }
 
@@ -816,6 +868,7 @@ export function createRequestAgents(
    * grants, and because the discovery row has to name the person the run belongs to.
    */
   selectionForActor?: (actorId: string) => ToolSelection,
+  harnessRuntime?: HarnessRuntime,
 ) {
   return async ({ request }: { request: Request }) => {
     const actor = await identifyActor(request);
@@ -829,6 +882,7 @@ export function createRequestAgents(
       computerGuidance,
       loadVendors,
       selectionForActor?.(actor.id),
+      harnessRuntime,
     );
     // Agents are built per request, so each instance belongs to exactly one person. The runner is
     // handed the agent and not the request; this is how it learns whose thread it is writing.
@@ -908,6 +962,8 @@ export function mountCopilotRuntime(
   selectionForActor?: (actorId: string) => ToolSelection,
   /** Where threads live. Required: a runtime with no runner would keep threads in process memory. */
   runner?: AgentRunner,
+  /** How managed harnesses are reached, when this deployment has computers. */
+  harnessRuntime?: HarnessRuntime,
 ) {
   if (!runner) {
     throw new Error("mountCopilotRuntime requires an agent runner");
@@ -943,6 +999,7 @@ export function mountCopilotRuntime(
       config.computer ? COMPUTER_GUIDANCE : undefined,
       loadVendors,
       selectionForActor,
+      harnessRuntime,
     ) as never,
   });
 

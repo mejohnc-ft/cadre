@@ -126,3 +126,26 @@ private tailnet of one person's devices and wrong for anything shared — set `G
 `~/.slice/server.env` before inviting anyone. State: `~/.slice/{server.env,server-supervisor.env,
 backups,logs}` on the machine and the `slice-server-pgdata` Docker volume. Re-running the script
 upgrades in place. Restore: `docker exec -i slice-server-postgres pg_restore -U slice -d slice -c < dump`.
+
+## Claude Code as a coworker (managed harness)
+
+The **Claude Code** coworker runs Claude Code headless inside its own computer. It is declared in
+the tenant package as `type: harness` / `harness: claude-code`; there is no endpoint to run —
+the server finds the Bot's computer wherever the mesh placed it and calls `/harness/run` there.
+
+- Each turn is one `claude -p` in `/workspace`, resumed from the thread's session (kept in the
+  workspace, so it survives a move). The profile's standing message is appended as system prompt.
+- **Every tool Claude Code wants — Bash, Edit, Write, Read, WebFetch… — asks the server first.**
+  A PreToolUse hook in the image posts the call to `/api/harness/:bot/decide`; the deployment's
+  boundaries evaluate it with `tool.name == "harness_<Tool>"`, `command` and `file` filled in;
+  the answer is audited as `computer.action_allowed` / `computer.action_refused`; a refusal
+  names the rule to the model. No server, no answer, no tool: it fails closed.
+- Model access: `HARNESS_ANTHROPIC_BASE_URL` / the model key on the supervisor
+  (Z.ai's coding plan: `https://api.z.ai/api/anthropic`). Today the key reaches the computer's
+  environment; moving it behind the egress proxy (PRD §7.7) is the next hardening step.
+
+```sh
+slice chat claude-code "Create notes.md with hello, then run ls -la"
+slice chat --thread <id> claude-code "What did you create earlier?"    # resumes the session
+# Boundaries apply: deny ["tool.name == \"harness_Bash\""] and the shell is refused, audited.
+```

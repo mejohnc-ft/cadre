@@ -28,6 +28,8 @@ import type { ThreadIdentity } from "./channels/thread-identity";
 import { createThreadRoutes } from "./channels/thread-routes";
 import { createThreadReader } from "./channels/thread-status";
 import type { ComputerProvider } from "./computer/provider";
+import type { ActionPolicy } from "./computer/policy";
+import { createHarnessRoutes } from "./harness/routes";
 import type { MeshProvider } from "./mesh/provider";
 import { createMeshRoutes } from "./mesh/routes";
 import type { NodeStore } from "./mesh/store";
@@ -165,6 +167,12 @@ export function createApp(
   computerProvider?: ComputerProvider,
   /** The mesh, when this deployment can hold more than one node. Routes are built here so they share the session guard. */
   mesh?: { nodes: NodeStore; provider: MeshProvider; audit: AuditStore },
+  /** The managed harness gateway: computers ask it before their harness uses a tool. */
+  harness?: {
+    computerToken: string | undefined;
+    policy: () => ActionPolicy;
+    audit: AuditStore;
+  },
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -657,6 +665,10 @@ export function createApp(
   // The Bot computer. Acting on a page needs the gateway and the policy it enforces, so both arrive
   // together or the routes are not mounted. An ungoverned computer is not a reduced feature. It is
   // the one shape of this feature that must not exist.
+  if (harness) {
+    app.route("/api", createHarnessRoutes(harness));
+  }
+
   if (mesh) {
     app.route(
       "/api",

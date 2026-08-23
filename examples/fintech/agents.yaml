@@ -1,6 +1,13 @@
 # An example tenant package. Every Bot here is reachable the moment the deployment starts, so the
 # surface never registers an endpoint that is unavailable by default.
 agents:
+  - id: claude-code
+    name: Claude Code
+    title: Engineering
+    role_description: A software engineer working in its own computer with Claude Code — reads, writes and runs code in its workspace, every tool decided by the deployment's boundaries first.
+    avatar_seed: claude-code
+    type: harness
+    harness: claude-code
   - id: general-assistant
     name: General Assistant
     title: Everyday Work

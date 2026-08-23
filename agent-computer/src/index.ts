@@ -18,6 +18,7 @@ import {
   type Screencast,
   startScreencast,
 } from "./screencast";
+import { createHarness } from "./harness";
 import { createShell } from "./shell";
 import {
   createWorkspace,
@@ -191,6 +192,17 @@ const profiles = createProfiles(process.env.PROFILES_DIR ?? "/profiles");
 // Rooted in the same workspace the file tools use, so a command and a written file see one
 // directory rather than two.
 const shell = createShell(process.env.WORKSPACE_DIR ?? "/workspace");
+/*
+ * The managed harness, when this image carries one. Its AG-UI endpoint is /harness/run; the
+ * server reaches it exactly as it reaches a remote Bot, with this computer's token.
+ */
+const harness = createHarness({
+  workspaceDir: process.env.WORKSPACE_DIR ?? "/workspace",
+  computerToken: COMPUTER_TOKEN,
+  ...(process.env.OPENBOT_SERVER_URL
+    ? { serverUrl: process.env.OPENBOT_SERVER_URL.replace(/\/$/, "") }
+    : {}),
+});
 
 /**
  * The id normally arrives as a header on every request. This is the fallback for a caller that has no
@@ -800,6 +812,31 @@ serve<StreamData>({
      * wrote the audit row before this was called. Refusing again here would be a second, quieter
      * policy nobody configured.
      */
+    if (url.pathname === "/harness/run" && request.method === "POST") {
+      const body = (await request.json().catch(() => null)) as {
+        threadId?: unknown;
+        runId?: unknown;
+        messages?: unknown;
+        forwardedProps?: unknown;
+      } | null;
+      if (
+        typeof body?.threadId !== "string" ||
+        typeof body?.runId !== "string"
+      ) {
+        return json({ error: "threadId and runId are required." }, 400);
+      }
+      return harness.run(botId, {
+        threadId: body.threadId,
+        runId: body.runId,
+        messages: Array.isArray(body.messages) ? (body.messages as never) : [],
+        forwardedProps: (body.forwardedProps ?? {}) as Record<string, unknown>,
+      });
+    }
+
+    if (url.pathname === "/harness/health" && request.method === "GET") {
+      return json(await harness.available());
+    }
+
     if (url.pathname === "/exec" && request.method === "POST") {
       const body = (await request.json().catch(() => null)) as {
         command?: unknown;

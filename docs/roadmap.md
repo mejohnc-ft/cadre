@@ -87,6 +87,11 @@ interface ComputerBackend {
 
 ## M4 — Control plane
 
+**Done:** managed harness. Claude Code runs inside the computer behind `/harness/run` (AG-UI out),
+every tool governed by the same CEL boundaries through a PreToolUse hook → `/api/harness/:bot/decide`,
+audited, fail-closed. Declared as `type: harness` in the tenant package. Sessions live in the workspace.
+**Remaining:** provider table + per-profile routing; artifact registry + local sync; egress key injection.
+
 - `provider`, `model_route`, `budget` tables; egress proxy injects provider keys (extends the existing egress path).
 - Harness adapter: a thin AG-UI server inside the computer image wrapping `claude` / `opencode` streams.
 - `artifact` + `artifact_version` tables; profile references; diff/rollback in UI; `slice sync` projects into `~/.claude`.

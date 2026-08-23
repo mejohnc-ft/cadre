@@ -119,7 +119,11 @@ const identifyActor: IdentifyActor = async (request) => {
 
 const config = loadConfig();
 const port = Number.parseInt(process.env.PORT ?? "3001", 10);
-const hostnames = bindAddresses(process.env.HOST, config.singleUser);
+const hostnames = bindAddresses(
+  process.env.HOST,
+  config.singleUser,
+  process.env.OPENBOT_COMPUTER_BIND,
+);
 const database = createDatabase(config.databaseUrl);
 await initializeDevActorUser(database, config.singleUser);
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
@@ -527,6 +531,13 @@ const app = createApp(
     }),
     // Where the threads go. Built above, warmed before anything could ask it for a list.
     threadRunner,
+    // Managed harnesses run in the Bot's computer, wherever the mesh has put it.
+    {
+      locate: (botId) => computerProvider.locate(botId),
+      ...(config.computer?.token
+        ? { computerToken: config.computer.token }
+        : {}),
+    },
   ),
   // The only path to an acting call.
   computerGateway,
@@ -558,6 +569,12 @@ const app = createApp(
   {
     nodes: nodeStore,
     provider: computerProvider,
+    audit: createAuditStore(database),
+  },
+  // The managed-harness gateway: computers ask it before Claude Code touches anything.
+  {
+    computerToken: config.computer?.token,
+    policy: () => policyStore.get(),
     audit: createAuditStore(database),
   },
 );

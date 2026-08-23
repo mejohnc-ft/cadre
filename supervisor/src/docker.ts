@@ -409,6 +409,8 @@ function hostConfig(names: ComputerNames, options: EnsureOptions) {
         }),
     RestartPolicy: { Name: "unless-stopped" },
     ...(options.network ? { NetworkMode: options.network } : {}),
+    // host.docker.internal resolves on Docker Desktop by itself; on Linux only with this.
+    ExtraHosts: ["host.docker.internal:host-gateway"],
     ...(options.runtime ? { Runtime: options.runtime } : {}),
 
     // No path from inside to more privilege than it started with, whatever it manages to run.

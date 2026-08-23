@@ -14,6 +14,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:${PATH}"
 
+# The managed harness. Claude Code's native installer, then the binary where the adapter finds it.
+# IS_SANDBOX tells Claude Code it may run without its own permission prompts as root: this is a
+# sandbox, and the deployment's policy — not Claude Code's prompts — decides every tool.
+RUN curl -fsSL https://claude.ai/install.sh | bash >/dev/null 2>&1 \
+  && cp /root/.local/bin/claude /usr/local/bin/claude && chmod 755 /usr/local/bin/claude
+ENV IS_SANDBOX=1
+COPY agent-computer/hooks/slice-hook.sh /opt/slice/hook.sh
+RUN chmod 755 /opt/slice/hook.sh
+
 WORKDIR /app
 # The lockfile as well as the manifest: `--frozen-lockfile` with no lockfile present resolves afresh
 # and exits 0, so the file has to be here for the flag to mean anything.

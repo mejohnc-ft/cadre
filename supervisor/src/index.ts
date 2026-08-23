@@ -111,8 +111,13 @@ const spireSocketVolume = process.env.SPIRE_AGENT_SOCKET_VOLUME;
  * which Bot, never what to run or what to set.
  */
 function environmentFor(botId: string): string[] {
-  const passthrough = Object.entries(process.env).filter(([key]) =>
-    key.startsWith("EGRESS_PROXY"),
+  const passthrough = Object.entries(process.env).filter(
+    ([key]) =>
+      key.startsWith("EGRESS_PROXY") ||
+      // The managed harness's model access and where the deployment's policy is reached from
+      // inside a computer. Set on the supervisor by the deployment; the image carries none of it.
+      key.startsWith("HARNESS_") ||
+      key === "COMPUTER_SERVER_URL",
   );
   /*
    * The secret the computer demands of its callers. Handed to every container this creates, from
@@ -132,7 +137,11 @@ function environmentFor(botId: string): string[] {
     ...(spireSocketVolume
       ? ["SPIFFE_ENDPOINT_SOCKET=/tmp/spire-agent/public/api.sock"]
       : []),
-    ...passthrough.map(([key, value]) => `${key}=${value ?? ""}`),
+    ...passthrough.map(([key, value]) =>
+      key === "COMPUTER_SERVER_URL"
+        ? `OPENBOT_SERVER_URL=${value ?? ""}`
+        : `${key}=${value ?? ""}`,
+    ),
   ];
 }
 

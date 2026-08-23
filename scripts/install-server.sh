@@ -29,10 +29,12 @@ CPUS=""
 MEMORY_GB=""
 MODEL_KEY=""
 MODEL_BASE_URL=""
+HARNESS_BASE_URL=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --model-key) MODEL_KEY="$2"; shift 2 ;;
     --model-base-url) MODEL_BASE_URL="$2"; shift 2 ;;
+    --harness-base-url) HARNESS_BASE_URL="$2"; shift 2 ;;
     --port) PORT="$2"; shift 2 ;;
     --serve-port) SERVE_PORT="$2"; shift 2 ;;
     --supervisor-port) SUPERVISOR_PORT="$2"; shift 2 ;;
@@ -66,6 +68,8 @@ TAILNET_IP="$(tailscale ip -4 | head -1)"
 MAGIC_NAME="$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')"
 [ -n "$TAILNET_IP" ] || fail "No tailnet address."
 PUBLIC_URL="http://$MAGIC_NAME:$SERVE_PORT"
+# Where computers reach this server: the docker0 bridge address.
+DOCKER_BRIDGE="$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || echo 172.17.0.1)"
 [ -n "$MODEL_KEY" ] || [ -f "$SERVER_ENV" ] || fail "--model-key is required the first time."
 
 info "2/7 secrets and configuration → $SERVER_ENV"
@@ -77,6 +81,7 @@ MANAGED_AGENT_TOKEN="$(existing MANAGED_AGENT_TOKEN "$SERVER_ENV")"; MANAGED_AGE
 PG_PASSWORD="$(existing PG_PASSWORD "$SERVER_ENV")"; PG_PASSWORD="${PG_PASSWORD:-$(openssl rand -hex 16)}"
 MODEL_KEY="${MODEL_KEY:-$(existing OPENAI_API_KEY "$SERVER_ENV")}"
 MODEL_BASE_URL="${MODEL_BASE_URL:-$(existing OPENAI_COMPATIBLE_BASE_URL "$SERVER_ENV")}"
+HARNESS_BASE_URL="${HARNESS_BASE_URL:-$(existing HARNESS_ANTHROPIC_BASE_URL "$SUPERVISOR_ENV")}"
 cat > "$SERVER_ENV" <<EOF
 # Written by scripts/install-server.sh. This deployment's secrets. Back up with the database.
 PORT=$PORT
@@ -96,6 +101,7 @@ OPENBOT_PUBLIC_URL=$PUBLIC_URL
 OPENAI_API_KEY=$MODEL_KEY
 OPENAI_BASE_URL=$MODEL_BASE_URL
 OPENAI_COMPATIBLE_BASE_URL=$MODEL_BASE_URL
+OPENBOT_COMPUTER_BIND=$DOCKER_BRIDGE
 NODE_ENV=production
 EOF
 SLICE_CPUS="${CPUS:-$(existing SLICE_CPUS "$SUPERVISOR_ENV")}"; SLICE_CPUS="${SLICE_CPUS:-$(( $(nproc) / 4 ))}"
@@ -114,6 +120,9 @@ SUPERVISOR_TOKEN=$SUPERVISOR_TOKEN
 COMPUTER_TOKEN=$COMPUTER_TOKEN
 SLICE_CPUS=$SLICE_CPUS
 SLICE_MEMORY_BYTES=$SLICE_MEMORY_BYTES
+COMPUTER_SERVER_URL=http://$DOCKER_BRIDGE:$PORT
+HARNESS_ANTHROPIC_AUTH_TOKEN=$MODEL_KEY
+HARNESS_ANTHROPIC_BASE_URL=$HARNESS_BASE_URL
 EOF
 # The app build and the migration tool read the repo's .env; point it at the real one.
 ln -sfn "$SERVER_ENV" "$ROOT/.env"

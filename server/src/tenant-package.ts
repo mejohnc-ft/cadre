@@ -304,15 +304,21 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
   const agents = asList(agentsYaml.agents, "agents.yaml agents").flatMap(
     (value) => {
       const agent = asRecord(value, "agent");
+      // `harness` is a remote_ag_ui row whose endpoint is the Bot's own computer, resolved at run
+      // time; the configuration names the harness instead of an address.
       const type: TenantAgent["type"] | undefined =
         agent.type === "built-in"
           ? "built_in"
-          : agent.type === "remote-ag-ui"
+          : agent.type === "remote-ag-ui" || agent.type === "harness"
             ? "remote_ag_ui"
             : undefined;
       if (!type) {
-        throw new Error("agent.type must be built-in or remote-ag-ui");
+        throw new Error("agent.type must be built-in, remote-ag-ui or harness");
       }
+      const harness =
+        agent.type === "harness"
+          ? requiredString(agent.harness, "agent.harness")
+          : undefined;
       const id = requiredString(agent.id, "agent.id");
       /*
        * A Bot may not be named after a deployment route.
@@ -328,7 +334,7 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
           `agent.id "${id}" is reserved for a deployment route and cannot name a Bot`,
         );
       }
-      if (type === "remote_ag_ui") {
+      if (type === "remote_ag_ui" && !harness) {
         const endpoint =
           typeof agent.endpoint === "string" ? agent.endpoint.trim() : "";
         if (!endpoint) {
@@ -358,9 +364,11 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
                     "agent.system_prompt",
                   ),
                 }
-              : {
-                  endpoint: requiredString(agent.endpoint, "agent.endpoint"),
-                },
+              : harness
+                ? { harness }
+                : {
+                    endpoint: requiredString(agent.endpoint, "agent.endpoint"),
+                  },
         },
       ];
     },

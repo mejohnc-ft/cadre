@@ -144,6 +144,9 @@ async function init(args: string[]) {
     "# For OpenAI-compatible providers (Z.ai, OpenRouter, vLLM, Ollama):",
     "OPENAI_COMPATIBLE_BASE_URL=",
     "OPENAI_BASE_URL=",
+    "# The managed harness (Claude Code) reaches its model through an Anthropic-compatible endpoint.",
+    "# Z.ai's coding plan: https://api.z.ai/api/anthropic. Leave empty for Anthropic itself.",
+    "HARNESS_ANTHROPIC_BASE_URL=",
     "",
   ];
   writeFileSync(ENV_FILE, lines.join("\n"), { mode: 0o600 });
@@ -245,6 +248,15 @@ async function up() {
         ...env,
         PORT: String(SUPERVISOR_PORT),
         COMPUTER_BACKEND: "apple",
+        // Computers reach this server on the VM bridge; the harness reaches its model as the
+        // deployment configured, never from anything baked into the image.
+        COMPUTER_SERVER_URL: `http://192.168.64.1:${SERVER_PORT}`,
+        ...(env.OPENAI_API_KEY
+          ? { HARNESS_ANTHROPIC_AUTH_TOKEN: env.OPENAI_API_KEY }
+          : {}),
+        ...(env.HARNESS_ANTHROPIC_BASE_URL
+          ? { HARNESS_ANTHROPIC_BASE_URL: env.HARNESS_ANTHROPIC_BASE_URL }
+          : {}),
       },
       stdout: Bun.file(join(LOGS, "supervisor.log")),
       stderr: Bun.file(join(LOGS, "supervisor.log")),
@@ -261,6 +273,8 @@ async function up() {
         ...env,
         PORT: String(SERVER_PORT),
         COMPUTER_SUPERVISOR_URL: `http://127.0.0.1:${SUPERVISOR_PORT}`,
+        // The Apple VM bridge, so the harness policy hook inside a computer can ask this server.
+        OPENBOT_COMPUTER_BIND: "192.168.64.1",
       },
       stdout: Bun.file(join(LOGS, "server.log")),
       stderr: Bun.file(join(LOGS, "server.log")),
@@ -422,11 +436,22 @@ async function runOnce(
           break;
         case "TOOL_CALL_START":
           if (event.toolCallId && event.toolCallName) {
-            calls.push({
-              id: event.toolCallId,
-              name: event.toolCallName,
-              arguments: "",
-            });
+            // Only the tools this terminal offers are its to execute. Anything else — a managed
+            // harness's own Bash or Edit, a server-side MCP tool — is activity to show, not a
+            // call to answer.
+            if (
+              TOOL_DEFINITIONS.some((tool) => tool.name === event.toolCallName)
+            ) {
+              calls.push({
+                id: event.toolCallId,
+                name: event.toolCallName,
+                arguments: "",
+              });
+            } else {
+              process.stdout.write(
+                `\x1b[2m  · ${event.toolCallName.replace(/^harness_/, "")}\x1b[0m\n`,
+              );
+            }
           }
           break;
         case "TOOL_CALL_ARGS": {
@@ -443,13 +468,22 @@ async function runOnce(
 }
 
 async function chat(args: string[]) {
-  const [bot, ...rest] = args;
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: { thread: { type: "string" } },
+  });
+  const [bot, ...rest] = positionals;
   const text = rest.join(" ");
-  if (!bot || !text) fail('Usage: slice chat <bot> "message"');
+  if (!bot || !text) fail('Usage: slice chat [--thread <id>] <bot> "message"');
   const api = `http://127.0.0.1:${SERVER_PORT}`;
-  const mint = await fetch(`${api}/api/threads/mint`, { method: "POST" }).then(
-    (r) => r.json() as Promise<{ threadId: string }>,
-  );
+  // A thread is a conversation. Without --thread each command starts a new one; with it, the Bot
+  // picks up where that thread left off, exactly as a channel does in the web app.
+  const mint = values.thread
+    ? { threadId: values.thread }
+    : await fetch(`${api}/api/threads/mint`, { method: "POST" }).then(
+        (r) => r.json() as Promise<{ threadId: string }>,
+      );
   const messages: Message[] = [
     { id: crypto.randomUUID(), role: "user", content: text },
   ];
@@ -493,6 +527,7 @@ async function chat(args: string[]) {
     }
   }
   process.stdout.write("\n");
+  process.stderr.write(`\x1b[2mthread ${mint.threadId}\x1b[0m\n`);
 }
 
 async function audit(args: string[]) {
@@ -703,7 +738,7 @@ switch (command) {
   slice down                              stop everything; volumes survive
   slice status                            what is running, and the slice's use
   slice agents                            list coworkers
-  slice chat <bot> "message"              one governed turn in the terminal
+  slice chat [--thread id] <bot> "..."    one governed turn; --thread continues a conversation
   slice audit [n]                         the latest audit rows
   slice nodes                             every machine in the mesh, with capacity
   slice node token                        mint a one-time enrollment token (run here)
