@@ -129,6 +129,13 @@ services:
       # Handed to every computer this creates, so the server and the computers share one secret.
       COMPUTER_TOKEN: ${COMPUTER_TOKEN:-}
       COMPUTER_IMAGE: ${COMPUTER_IMAGE:-openbot-agent-computer:latest}
+      # The slice: how much of this machine agents may use, together. Empty means unlimited, which
+      # is the pre-slice behaviour. Each computer reserves COMPUTER_CPUS / COMPUTER_MEMORY_BYTES
+      # (defaults 1 core / 2 GiB) and a computer that would exceed the slice is refused with a 429.
+      SLICE_CPUS: ${SLICE_CPUS:-}
+      SLICE_MEMORY_BYTES: ${SLICE_MEMORY_BYTES:-}
+      COMPUTER_CPUS: ${COMPUTER_CPUS:-}
+      COMPUTER_MEMORY_BYTES: ${COMPUTER_MEMORY_BYTES:-}
       # Which deployment the computers it creates belong to, so two stacks on one Docker host never
       # derive the same container and volume names for the same Bot.
       COMPUTER_NAMESPACE: ${COMPUTER_NAMESPACE:-openbot}

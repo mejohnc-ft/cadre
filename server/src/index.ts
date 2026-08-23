@@ -535,6 +535,7 @@ const app = createApp(
   // Chooses the coworker for an untagged message, on the deployment's own model and key.
   intentRouter,
   threadRunner,
+  computerProvider,
 );
 
 /**

@@ -1,4 +1,5 @@
 import { serve } from "bun";
+import type { Context } from "hono";
 import { Hono } from "hono";
 import {
   ComputerNotAnsweringError,
@@ -12,6 +13,14 @@ import {
 } from "./docker";
 import { registerEntry } from "./identity";
 import { namesFor } from "./names";
+import {
+  admit,
+  budgetFromEnvironment,
+  capacity,
+  countsAgainstBudget,
+  reservationFromEnvironment,
+  SliceExhaustedError,
+} from "./slice";
 
 /**
  * The container supervisor: the only thing here that holds the Docker socket.
@@ -47,9 +56,14 @@ if (!token) {
 const image = process.env.COMPUTER_IMAGE ?? "openbot-agent-computer:latest";
 const network = process.env.COMPUTER_NETWORK;
 const runtime = process.env.COMPUTER_RUNTIME;
-const memoryBytes = process.env.COMPUTER_MEMORY_BYTES
-  ? Number.parseInt(process.env.COMPUTER_MEMORY_BYTES, 10)
-  : undefined;
+/**
+ * The slice this machine's owner dedicated, and what each computer reserves from it.
+ *
+ * Read once at boot and refused loudly when malformed: a supervisor that misread its budget into
+ * "unlimited" would be enforcing nothing while reporting success.
+ */
+const sliceBudget = budgetFromEnvironment(process.env);
+const perComputer = reservationFromEnvironment(process.env);
 const spireSocketVolume = process.env.SPIRE_AGENT_SOCKET_VOLUME;
 
 /**
@@ -89,27 +103,92 @@ const app = new Hono();
 
 app.use("*", async (context, next) => {
   // Health is open so an orchestrator can check it without holding the token.
-  if (context.req.path === "/health") return next();
+  if (context.req.path === "/health" || context.req.path === "/v1/health") {
+    return next();
+  }
   if (context.req.header("authorization") !== `Bearer ${token}`) {
     return context.json({ error: "Unauthorized." }, 401);
   }
   return next();
 });
 
-app.get("/health", async (context) =>
-  context.json({ status: "ok", docker: await reachable() }),
-);
+const health = async (context: Context) =>
+  context.json({
+    status: "ok",
+    docker: await reachable(),
+    // The contract this supervisor speaks. A server that needs a capability asks this, not the
+    // version of the package.
+    contract: "v1",
+  });
+app.get("/health", health);
+app.get("/v1/health", health);
+/**
+ * The computer verbs, once, mounted at both the root (the paths the fork inherited) and /v1 (the
+ * versioned contract). Same handlers, same token, so "no behaviour change" is a route table fact.
+ */
+const computers = new Hono();
+
+/**
+ * The slice, live. What the owner dedicated, what running computers hold, what is left.
+ */
+const reportCapacity = async (context: Context) => {
+  try {
+    const owned = await listOwned();
+    const running = owned.filter((computer) =>
+      countsAgainstBudget(computer.status),
+    );
+    return context.json({
+      ...capacity(
+        sliceBudget,
+        running.map((computer) => computer.reservation ?? perComputer),
+      ),
+      perComputer,
+      computers: running.map((computer) => ({
+        botId: computer.botId,
+        status: computer.status,
+        reservation: computer.reservation ?? perComputer,
+      })),
+    });
+  } catch (error) {
+    if (error instanceof DockerUnavailableError) {
+      return context.json({ error: error.message }, 503);
+    }
+    throw error;
+  }
+};
+computers.get("/capacity", reportCapacity);
 
 /** The Bot id in the path, validated before it becomes any kind of name. */
 function resolve(raw: string) {
   return namesFor(raw);
 }
 
-app.post("/computers/:botId/ensure", async (context) => {
+computers.post("/computers/:botId/ensure", async (context) => {
   const parsed = resolve(context.req.param("botId"));
   if (!parsed.ok) return context.json({ error: parsed.reason }, 400);
 
   try {
+    /*
+     * Admission, before anything is created. The count is taken from the containers that exist
+     * right now — never from supervisor memory — so a restart forgets nothing and a computer this
+     * Bot already holds is not double-counted against it.
+     */
+    const owned = await listOwned();
+    const held = owned.some(
+      (computer) =>
+        computer.botId === parsed.names.botId &&
+        countsAgainstBudget(computer.status),
+    );
+    if (!held) {
+      admit(
+        sliceBudget,
+        owned
+          .filter((computer) => countsAgainstBudget(computer.status))
+          .map((computer) => computer.reservation ?? perComputer),
+        perComputer,
+      );
+    }
+
     // Registered before the computer is handed out, so it can prove which Bot it is from its first
     // request.
     const identity = await registerEntry(parsed.names);
@@ -119,7 +198,8 @@ app.post("/computers/:botId/ensure", async (context) => {
       environment: environmentFor(parsed.names.botId),
       ...(network ? { network } : {}),
       ...(runtime ? { runtime } : {}),
-      ...(memoryBytes ? { memoryBytes } : {}),
+      memoryBytes: perComputer.memoryBytes,
+      cpus: perComputer.cpus,
       ...(spireSocketVolume ? { spireSocketVolume } : {}),
     });
     return context.json({
@@ -134,6 +214,12 @@ app.post("/computers/:botId/ensure", async (context) => {
     if (error instanceof NameHeldError) {
       return context.json({ error: error.message }, 409);
     }
+    // A full slice is not an outage: the machine is healthy and doing exactly what its owner said.
+    // 429 with Retry-After tells the placer to wait or to place elsewhere.
+    if (error instanceof SliceExhaustedError) {
+      context.header("Retry-After", String(error.retryAfterSeconds));
+      return context.json({ error: error.message }, 429);
+    }
     // Not ready is a 503 like an outage is, because the caller's next move is the same: wait and
     // ask again. The message is what differs, and it is the part an operator acts on.
     if (
@@ -146,7 +232,7 @@ app.post("/computers/:botId/ensure", async (context) => {
   }
 });
 
-app.post("/computers/:botId/stop", async (context) => {
+computers.post("/computers/:botId/stop", async (context) => {
   const parsed = resolve(context.req.param("botId"));
   if (!parsed.ok) return context.json({ error: parsed.reason }, 400);
   try {
@@ -160,7 +246,7 @@ app.post("/computers/:botId/stop", async (context) => {
   }
 });
 
-app.post("/computers/:botId/reset", async (context) => {
+computers.post("/computers/:botId/reset", async (context) => {
   const parsed = resolve(context.req.param("botId"));
   if (!parsed.ok) return context.json({ error: parsed.reason }, 400);
   try {
@@ -174,7 +260,7 @@ app.post("/computers/:botId/reset", async (context) => {
   }
 });
 
-app.get("/computers", async (context) => {
+computers.get("/computers", async (context) => {
   try {
     return context.json({ computers: await listOwned() });
   } catch (error) {
@@ -184,6 +270,9 @@ app.get("/computers", async (context) => {
     throw error;
   }
 });
+
+app.route("/", computers);
+app.route("/v1", computers);
 
 serve({ port, fetch: app.fetch, idleTimeout: 120 });
 

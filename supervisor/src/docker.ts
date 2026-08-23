@@ -53,6 +53,8 @@ function pause(ms: number): Promise<void> {
 }
 
 export type ComputerState = {
+  /** What this computer holds against the slice, when its labels record one. */
+  reservation?: { cpus: number; memoryBytes: number };
   botId: string;
   container: string;
   status: string;
@@ -131,11 +133,40 @@ function ours(labels: Record<string, string> | undefined): boolean {
 }
 
 /** The labels every container and volume this supervisor creates carries. */
-function labelsFor(names: ComputerNames): Record<string, string> {
+const CPUS_LABEL = "openbot.cpus";
+const MEMORY_LABEL = "openbot.memory-bytes";
+
+function labelsFor(
+  names: ComputerNames,
+  options?: Pick<EnsureOptions, "cpus" | "memoryBytes">,
+): Record<string, string> {
   return {
     [OWNER_LABEL]: "true",
     [BOT_LABEL]: names.botId,
     [NAMESPACE_LABEL]: NAMESPACE,
+    // The reservation, written where a listing can read it back. The slice is re-counted from
+    // running containers on every admission, so a supervisor restart forgets nothing.
+    ...(options?.cpus ? { [CPUS_LABEL]: String(options.cpus) } : {}),
+    ...(options?.memoryBytes
+      ? { [MEMORY_LABEL]: String(options.memoryBytes) }
+      : {}),
+  };
+}
+
+/**
+ * The reservation a container's labels record. Undefined for one made before slices existed, so
+ * the caller charges it the current per-computer reservation rather than zero — an old computer
+ * must never look free.
+ */
+export function reservationOf(
+  labels: Record<string, string> | undefined,
+): { cpus: number; memoryBytes: number } | undefined {
+  if (!labels?.[CPUS_LABEL] && !labels?.[MEMORY_LABEL]) return undefined;
+  const cpus = Number(labels?.[CPUS_LABEL] ?? "0");
+  const memoryBytes = Number(labels?.[MEMORY_LABEL] ?? "0");
+  return {
+    cpus: Number.isFinite(cpus) ? cpus : 0,
+    memoryBytes: Number.isFinite(memoryBytes) ? memoryBytes : 0,
   };
 }
 
@@ -152,6 +183,9 @@ export async function listOwned(): Promise<ComputerState[]> {
       botId: container.Labels?.[BOT_LABEL] ?? "unknown",
       container: (container.Names?.[0] ?? "").replace(/^\//, ""),
       status: container.State,
+      ...(reservationOf(container.Labels)
+        ? { reservation: reservationOf(container.Labels) }
+        : {}),
       ...(container.Created
         ? { startedAt: new Date(container.Created * 1000).toISOString() }
         : {}),
@@ -301,6 +335,11 @@ export type EnsureOptions = {
   runtime?: string;
   memoryBytes?: number;
   /**
+   * CPU cores this computer may use, fractional allowed. Enforced by the kernel scheduler
+   * (NanoCpus), and recorded on the container so the slice can be re-counted from a listing.
+   */
+  cpus?: number;
+  /**
    * How long a started computer is given to answer before the attempt is called a failure.
    *
    * Configurable because the wait now fails rather than returning, so the number decides when a slow
@@ -361,6 +400,7 @@ function hostConfig(names: ComputerNames, options: EnsureOptions) {
     CapDrop: ["ALL"],
     // A runaway Bot is a resource problem for itself, not for every other Bot on the host.
     ...(options.memoryBytes ? { Memory: options.memoryBytes } : {}),
+    ...(options.cpus ? { NanoCpus: Math.round(options.cpus * 1e9) } : {}),
     PidsLimit: options.pidsLimit ?? 512,
     // Chromium's sandbox wants shared memory and will crash on the 64MB default.
     ShmSize: 1_073_741_824,
@@ -413,7 +453,7 @@ export async function ensure(
         try {
           await docker.createVolume({
             Name: volume,
-            Labels: labelsFor(names),
+            Labels: labelsFor(names, options),
           });
         } catch (error) {
           // Already exists is success for a restarted supervisor.
@@ -429,7 +469,7 @@ export async function ensure(
           Image: options.image,
           // The Bot id is a label because that is what a SPIRE docker workload attestor selects on:
           // an identity per Bot then falls out of the same fact that names the container.
-          Labels: labelsFor(names),
+          Labels: labelsFor(names, options),
           Env: options.environment,
           ExposedPorts: { [COMPUTER_PORT]: {} },
           HostConfig: hostConfig(names, options),

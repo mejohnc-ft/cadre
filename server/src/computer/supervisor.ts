@@ -90,7 +90,7 @@ export function createDockerSupervisorProvider(
   }
 
   async function listRaw(): Promise<SupervisorComputerLocation[]> {
-    const body = (await call("/computers", "GET")) as {
+    const body = (await call("/v1/computers", "GET")) as {
       computers?: SupervisorComputerLocation[];
     } | null;
     return body?.computers ?? [];
@@ -148,6 +148,14 @@ export function createDockerSupervisorProvider(
     isolation: "per-bot",
 
     /**
+     * The slice, straight from the supervisor: budget, use, and what is left. The UI's answer to
+     * "how much of this machine are agents using".
+     */
+    async capacity(): Promise<unknown> {
+      return call("/v1/capacity", "GET");
+    },
+
+    /**
      * The URL of this Bot's computer, starting it if it is not already up.
      *
      * A computer that is running but has published no port is a computer nothing can reach, so that
@@ -166,7 +174,7 @@ export function createDockerSupervisorProvider(
 
     async locate(botId: string): Promise<string> {
       const state = (await call(
-        `/computers/${encodeURIComponent(botId)}/ensure`,
+        `/v1/computers/${encodeURIComponent(botId)}/ensure`,
       )) as SupervisorComputerLocation;
       // Recorded on every ensure, so a replaced container is visible to whatever asks next.
       if (state?.startedAt) sessions.set(botId, state.startedAt);
@@ -200,14 +208,14 @@ export function createDockerSupervisorProvider(
 
     async stop(botId: string): Promise<{ wasRunning: boolean }> {
       const result = (await call(
-        `/computers/${encodeURIComponent(botId)}/stop`,
+        `/v1/computers/${encodeURIComponent(botId)}/stop`,
       )) as { stopped?: boolean } | null;
       return { wasRunning: result?.stopped === true };
     },
 
     async reset(botId: string): Promise<{ cleared: boolean }> {
       const result = (await call(
-        `/computers/${encodeURIComponent(botId)}/reset`,
+        `/v1/computers/${encodeURIComponent(botId)}/reset`,
       )) as { reset?: boolean } | null;
       return { cleared: result?.reset === true };
     },

@@ -80,6 +80,11 @@ export interface ComputerProvider {
   /** Prepare provider resources before the first computer request. */
   warm?(): Promise<void>;
   /**
+   * The slice this provider's machine dedicates to computers, when the backend enforces one:
+   * budget, current use, and what is left. Absent for providers with no notion of capacity.
+   */
+  capacity?(): Promise<unknown>;
+  /**
    * Which run of this Bot's computer is current, if the provider can tell.
    *
    * A snapshot's generation only orders snapshots within one run: a replaced container counts from

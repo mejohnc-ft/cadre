@@ -27,6 +27,7 @@ import { type ChannelStore, createChannelRoutes } from "./channels/routes";
 import type { ThreadIdentity } from "./channels/thread-identity";
 import { createThreadRoutes } from "./channels/thread-routes";
 import { createThreadReader } from "./channels/thread-status";
+import type { ComputerProvider } from "./computer/provider";
 import type { ThreadStore } from "./runtime/postgres-runner";
 import { createComponentRoutes } from "./components/routes";
 import type { SandboxedStore } from "./components/sandboxed";
@@ -157,6 +158,8 @@ export function createApp(
   intentRouter?: IntentRouter,
   /** The thread store the runtime writes to; answers whether a remembered thread still exists. */
   threadStore?: ThreadStore,
+  /** The computer provider, when this deployment has one; serves the slice capacity view. */
+  computerProvider?: ComputerProvider,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -650,6 +653,25 @@ export function createApp(
   // together or the routes are not mounted. An ungoverned computer is not a reduced feature. It is
   // the one shape of this feature that must not exist.
   if (computerGateway && computerPolicy) {
+    /*
+     * The slice, for the people running this deployment. Registered before the computer routes so
+     * the path is not swallowed by their :botId matchers. Admin-only: capacity names every Bot with
+     * a computer, which is more than a member's own view.
+     */
+    if (computerProvider?.capacity) {
+      app.get("/api/computers/capacity", requireUser, async (context) => {
+        const denied = requireAdmin(context);
+        if (denied) return denied;
+        try {
+          return context.json(await computerProvider.capacity?.());
+        } catch (error) {
+          return context.json(
+            { error: error instanceof Error ? error.message : String(error) },
+            503,
+          );
+        }
+      });
+    }
     app.route(
       "/api/computers",
       createComputerRoutes(

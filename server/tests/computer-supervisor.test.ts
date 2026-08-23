@@ -96,7 +96,7 @@ describe("locating a Bot's computer", () => {
       }) as unknown as typeof fetch,
     });
     await client.locate("a/b");
-    expect(seen).toBe("/computers/a%2Fb/ensure");
+    expect(seen).toBe("/v1/computers/a%2Fb/ensure");
   });
 });
 

@@ -4,8 +4,12 @@
 # neither.
 FROM mcr.microsoft.com/playwright:v1.62.1-noble
 
-# unzip is not in the Playwright image and bun's installer needs it.
-RUN apt-get update && apt-get install -y --no-install-recommends unzip \
+# unzip is not in the Playwright image and bun's installer needs it. The rest is the toolbox a
+# Bot's shell actually earns its keep with: version control, a scripting runtime, search, JSON,
+# and an editor for the person who takes the wheel. Kept to apt so the image stays reproducible.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    unzip git python3 python3-venv python3-pip \
+    ripgrep jq sqlite3 less nano file zip \
   && rm -rf /var/lib/apt/lists/* \
   && curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:${PATH}"
