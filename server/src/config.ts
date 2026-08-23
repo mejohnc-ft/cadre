@@ -1,24 +1,15 @@
 /**
- * What the runtime can do. There is exactly one answer because CopilotKit Intelligence is required
- * for durable threads and memory. Configuration the product cannot function without belongs at the
- * boot boundary.
+ * Deployment configuration, resolved once at boot. Configuration the product cannot function
+ * without is refused here rather than discovered at the first request.
  */
 import { singleUserEnabled } from "./auth/dev-actor";
 import type { ActionPolicy } from "./computer/policy";
 import { parseActionPolicy } from "./computer/policy-store";
 
 export type RuntimeCapabilities = {
-  mode: "intelligence";
+  /** Threads, messages and memory live in this deployment's own PostgreSQL. */
+  mode: "postgres";
   durableHistory: true;
-  intelligence: IntelligenceSettings;
-};
-
-/** The Intelligence contract. Every field is required; see runtimeCapabilities. */
-export type IntelligenceSettings = {
-  apiUrl: string;
-  gatewayWsUrl: string;
-  apiKey: string;
-  licenseToken: string;
 };
 
 export type DockerComputerConfig = {
@@ -104,10 +95,9 @@ export type DeploymentConfig = {
    */
   managedAgent?: ManagedAgentConfig;
   /**
-   * What this deployment calls itself, when more than one shares an Intelligence project.
-   *
-   * Absent, the tenant package's id stands in, which separates deployments running different
-   * packages but not a copy of one running alongside the original. See channels/thread-identity.ts.
+   * What this deployment calls itself. Carried in thread ids so two deployments that ever share a
+   * database backup remain distinguishable. Absent, the tenant package's id stands in. See
+   * channels/thread-identity.ts.
    */
   deploymentId: string | undefined;
   /**
@@ -444,40 +434,12 @@ function oktaAuth(
 }
 
 /**
- * Resolve the Intelligence contract, or refuse to start.
- *
- * All four values are required together. A partial set is the more dangerous shape than none at all:
- * it means somebody intended to configure Intelligence and got it wrong, so failing on the partial
- * set alone (as this did) let a completely unconfigured deployment through as if that were a choice.
+ * What the runtime can promise. There is one mode: the deployment's own database holds every
+ * thread, so history is durable for exactly as long as the database is. No external service is
+ * consulted and nothing here can be missing.
  */
-function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
-  const settings = {
-    apiUrl: url(environment, "INTELLIGENCE_API_URL"),
-    gatewayWsUrl: url(environment, "INTELLIGENCE_GATEWAY_WS_URL"),
-    apiKey: optional(environment, "INTELLIGENCE_API_KEY"),
-    licenseToken: optional(environment, "COPILOTKIT_LICENSE_TOKEN"),
-  };
-
-  const missing = Object.entries({
-    INTELLIGENCE_API_URL: settings.apiUrl,
-    INTELLIGENCE_GATEWAY_WS_URL: settings.gatewayWsUrl,
-    INTELLIGENCE_API_KEY: settings.apiKey,
-    COPILOTKIT_LICENSE_TOKEN: settings.licenseToken,
-  })
-    .filter(([, value]) => !value)
-    .map(([name]) => name);
-
-  if (missing.length > 0) {
-    throw new Error(
-      `CopilotKit Intelligence is required and is not configured. Missing: ${missing.join(", ")}`,
-    );
-  }
-
-  return {
-    mode: "intelligence",
-    durableHistory: true,
-    intelligence: settings as IntelligenceSettings,
-  };
+function runtimeCapabilities(): RuntimeCapabilities {
+  return { mode: "postgres", durableHistory: true };
 }
 
 function computerConfig(environment: Environment): ComputerConfig | undefined {
@@ -626,7 +588,7 @@ export function loadConfig(
     )?.replace(/\/+$/, ""),
     tenantPackageDirectory:
       optional(environment, "TENANT_PACKAGE_DIR") ?? "../examples/fintech",
-    runtime: runtimeCapabilities(environment),
+    runtime: runtimeCapabilities(),
     agentStallTimeoutMs: agentStallTimeoutMs(environment),
     auditRetentionDays: auditRetentionDays(environment),
     oauth: { google },
@@ -644,4 +606,27 @@ export function loadConfig(
       ? { agentToolToken: optional(environment, "AGENT_TOOL_TOKEN") as string }
       : {}),
   };
+}
+
+const LOOPBACK = new Set(["127.0.0.1", "::1", "localhost"]);
+
+/**
+ * Where the server listens.
+ *
+ * Single-user mode admits every request as the administrator, so it is only ever safe on an
+ * interface nothing else can reach. Unset, it binds loopback; set to anything else, the server
+ * refuses to start rather than serve an open deployment. With sign-in configured the default is
+ * every interface, which is what a server on a tailnet wants.
+ */
+export function bindAddress(
+  requested: string | undefined,
+  singleUser: boolean,
+): string {
+  const host = requested?.trim() || (singleUser ? "127.0.0.1" : "0.0.0.0");
+  if (singleUser && !LOOPBACK.has(host)) {
+    throw new Error(
+      `OPENBOT_SINGLE_USER=true admits every visitor as the administrator and may only bind loopback, not HOST=${host}. Configure sign-in to listen on other interfaces.`,
+    );
+  }
+  return host;
 }

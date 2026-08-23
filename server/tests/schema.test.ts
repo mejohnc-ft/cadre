@@ -148,7 +148,9 @@ describe("OpenBot database schema", () => {
         .columns.filter((column) => column.getSQLType().startsWith("vector"))
         .map((column) => `${getTableName(table)}.${column.name}`),
     );
-    expect(vectorColumns).toEqual([]);
+    // The one embedding this schema holds is a coworker's own memory of a person — first-party,
+    // written by the deployment, not a copy of anybody's corpus. Anything else is a reintroduction.
+    expect(vectorColumns).toEqual(["agent_memories.embedding"]);
   });
 
   test("includes Better Auth's verified Google identity records", () => {

@@ -1,11 +1,8 @@
 import type { BaseEvent, RunAgentInput } from "@ag-ui/client";
 import { AbstractAgent, HttpAgent } from "@ag-ui/client";
 import type { BuiltInAgentConfiguration } from "@copilotkit/runtime/v2";
-import {
-  BuiltInAgent,
-  CopilotKitIntelligence,
-  CopilotRuntime,
-} from "@copilotkit/runtime/v2";
+import type { AgentRunner } from "@copilotkit/runtime/v2";
+import { BuiltInAgent, CopilotSseRuntime } from "@copilotkit/runtime/v2";
 import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
 import type { Observable } from "rxjs";
 import { defer, from, switchMap } from "rxjs";
@@ -27,17 +24,16 @@ import type { GrantedTool } from "./plugins/tools";
 import { grantedToolGuidance } from "./plugins/tools";
 
 /**
- * The CopilotKit runtime, always in Intelligence mode.
+ * The CopilotKit runtime, in SSE mode over this deployment's own agent runner.
  *
  * Package-declared built-in Bots run as CopilotKit `BuiltInAgent` instances. External Bots are
  * reached over AG-UI as `HttpAgent` instances, so anything that speaks the protocol remains a Bot
  * with no framework adapter here: LangGraph, Pydantic-AI, CrewAI, Mastra, ADK, or a hand-written
  * server.
  *
- * There is no SSE branch. Intelligence is a requirement of the product, not a tier: it owns
- * durable threads, memory and learning, and a deployment without it silently forgets every
- * conversation. config.ts refuses to boot without the full contract, so by the time this runs the
- * settings are present and this file has one mode.
+ * Upstream OpenBot ran this in Intelligence mode, with threads and memory in a hosted service.
+ * Slice hands the runtime a runner that keeps them in PostgreSQL (runtime/postgres-runner.ts), so
+ * the deployment has no dependency beyond the model API and nothing forgets a conversation.
  */
 
 /** Resolve the signed-in person for a request. Threads and memory are scoped to whoever this returns. */
@@ -791,7 +787,7 @@ export function createRequestAgents(
 ) {
   return async ({ request }: { request: Request }) => {
     const actor = await identifyActor(request);
-    return resolveRuntimeAgents(
+    const agents = await resolveRuntimeAgents(
       () => loadAgents(actor),
       model,
       resolveModelApiKey,
@@ -802,7 +798,26 @@ export function createRequestAgents(
       loadVendors,
       selectionForActor?.(actor.id),
     );
+    // Agents are built per request, so each instance belongs to exactly one person. The runner is
+    // handed the agent and not the request; this is how it learns whose thread it is writing.
+    for (const agent of Object.values(agents)) {
+      if (agent && typeof agent === "object") {
+        AGENT_ACTOR.set(agent as object, actor.id);
+      }
+    }
+    return agents;
   };
+}
+
+/**
+ * Which person a per-request agent instance was built for. Keyed by the instance, so it is read
+ * by the runner from the `agent` it is given and never from anything a Bot could influence.
+ */
+export const AGENT_ACTOR = new WeakMap<object, string>();
+
+/** The runner's `userFor`: the actor the agent instance was built for, or "" for none. */
+export function actorForAgent(agent: object): string {
+  return AGENT_ACTOR.get(agent) ?? "";
 }
 
 /**
@@ -830,28 +845,25 @@ export function mountCopilotRuntime(
   basePath = "/api/copilotkit",
   loadVendors?: () => Promise<readonly string[]>,
   selectionForActor?: (actorId: string) => ToolSelection,
+  /** Where threads live. Required: a runtime with no runner would keep threads in process memory. */
+  runner?: AgentRunner,
 ) {
-  const { intelligence } = config.runtime;
+  if (!runner) {
+    throw new Error("mountCopilotRuntime requires an agent runner");
+  }
 
-  const runtime = new CopilotRuntime({
-    // `mode` is inferred from the presence of `intelligence`; passing it is a type error.
-    //
-    // identifyUser is NOT optional in practice. Threads and memory are scoped to the user it
-    // returns, so omitting it puts every person in the deployment in the same thread space and one
-    // person's conversations become another's.
-    identifyUser,
-    intelligence: new CopilotKitIntelligence({
-      apiUrl: intelligence.apiUrl,
-      wsUrl: intelligence.gatewayWsUrl,
-      apiKey: intelligence.apiKey,
-    }),
-    licenseToken: intelligence.licenseToken,
+  // `identifyUser` has no slot in SSE mode; the runner learns whose thread a run is from the
+  // per-request agent instance (see AGENT_ACTOR), and app.ts scopes the runtime's own /threads
+  // endpoints to the caller. The parameter stays so the call site reads as the attribution it is.
+  void identifyUser;
+  const runtime = new CopilotSseRuntime({
+    runner,
     // Carried on the events the runtime already sends, so OpenBot's traffic is separable from any
     // other deployment's. Adds no events of its own.
     ...(config.accessibility
       ? { telemetryProperties: { accessibility_title: "OpenBot" } }
       : {}),
-    // `identifyUser` is the Intelligence projection of the same person `identifyActor` returns:
+    // `identifyUser` is the thread-scope projection of the same person `identifyActor` returns:
     // one resolver decides both whose threads these are and whose coworkers exist.
     agents: createRequestAgents(
       identifyActor,

@@ -232,16 +232,11 @@ INFO="$(curl -fsS --max-time 8 "http://localhost:$SERVER_PORT/api/copilotkit/inf
 python3 - "$INFO" <<'PY'
 import json, sys
 info = json.loads(sys.argv[1])
-status, agents = info.get("licenseStatus"), list(info.get("agents", {}))
-if status != "valid":
-    print(f"\033[31m  licence is '{status}', not 'valid'.\033[0m")
-    print("\033[31m  Run: npx copilotkit@latest login && npx copilotkit@latest license --write\033[0m")
-    print("\033[31m  See README.md for Intelligence setup.\033[0m")
-    raise SystemExit(1)
+agents = list(info.get("agents", {}))
 if not agents:
     print("\033[31m  No Bots registered.\033[0m")
     raise SystemExit(1)
-print(f"\033[32m  licence valid · mode {info.get('mode')} · Bots: {', '.join(agents)}\033[0m")
+print(f"\033[32m  runtime up · Bots: {', '.join(agents)}\033[0m")
 PY
 
 info "4/4  App"

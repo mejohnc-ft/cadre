@@ -31,8 +31,10 @@ import {
   describeComputerIsolation,
 } from "./computer/provider";
 import { createSnapshotStore } from "./computer/snapshot-store";
-import { loadConfig } from "./config";
+import { bindAddress, loadConfig } from "./config";
+import { PostgresAgentRunner } from "./runtime/postgres-runner";
 import {
+  actorForAgent,
   type IdentifyActor,
   type IdentifyUser,
   mountCopilotRuntime,
@@ -85,7 +87,7 @@ async function resolveRequestActor(request: Request): Promise<{
   };
 }
 
-/** The Intelligence projection of {@link resolveRequestActor}: threads are scoped to this person. */
+/** The thread-scope projection of {@link resolveRequestActor}: threads belong to this person. */
 const identifyUser: IdentifyUser = async (request) => {
   const { id, name } = await resolveRequestActor(request);
   return { id, name };
@@ -114,6 +116,7 @@ const identifyActor: IdentifyActor = async (request) => {
 
 const config = loadConfig();
 const port = Number.parseInt(process.env.PORT ?? "3001", 10);
+const hostname = bindAddress(process.env.HOST, config.singleUser);
 const database = createDatabase(config.databaseUrl);
 await initializeDevActorUser(database, config.singleUser);
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
@@ -392,6 +395,15 @@ const chooseSkills = createModelCompleter({
     }),
 });
 
+/**
+ * Where every thread lives. Built once; the runtime runs agents through it and the thread routes
+ * ask it what exists. Warmed so the thread list answers before anyone has opened a channel.
+ */
+const threadRunner = new PostgresAgentRunner(database, {
+  userFor: (request) => actorForAgent(request.agent),
+});
+await threadRunner.warm();
+
 const app = createApp(
   config,
   auth,
@@ -489,6 +501,8 @@ const app = createApp(
         });
       },
     }),
+    // Where the threads go. Built above, warmed before anything could ask it for a list.
+    threadRunner,
   ),
   // The only path to an acting call.
   computerGateway,
@@ -515,6 +529,7 @@ const app = createApp(
   identityProviderStore,
   // Chooses the coworker for an untagged message, on the deployment's own model and key.
   intentRouter,
+  threadRunner,
 );
 
 /**
@@ -565,6 +580,7 @@ const asChannelSocket = (ws: { data: SocketData }) =>
 
 serve<SocketData>({
   port,
+  hostname,
   async fetch(request, server) {
     const url = new URL(request.url);
     const streamBotId = streamPathBotId(url.pathname);

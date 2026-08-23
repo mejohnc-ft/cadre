@@ -27,6 +27,7 @@ import { type ChannelStore, createChannelRoutes } from "./channels/routes";
 import type { ThreadIdentity } from "./channels/thread-identity";
 import { createThreadRoutes } from "./channels/thread-routes";
 import { createThreadReader } from "./channels/thread-status";
+import type { ThreadStore } from "./runtime/postgres-runner";
 import { createComponentRoutes } from "./components/routes";
 import type { SandboxedStore } from "./components/sandboxed";
 import { createSandboxedRoutes } from "./components/sandboxed-routes";
@@ -36,7 +37,6 @@ import type { PolicyStore } from "./computer/policy-store";
 import { createComputerRoutes } from "./computer/routes";
 import { configuredAuthProviders, type DeploymentConfig } from "./config";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
-import { createIntelligenceClient } from "./intelligence-client";
 import type { PeopleStore } from "./people/store";
 import { createPluginRoutes } from "./plugins/routes";
 import type { PluginStore } from "./plugins/store";
@@ -155,13 +155,14 @@ export function createApp(
    * the default coworker, which is exactly the failsafe the router itself falls back to.
    */
   intentRouter?: IntentRouter,
+  /** The thread store the runtime writes to; answers whether a remembered thread still exists. */
+  threadStore?: ThreadStore,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
   app.get("/health", (context) => context.json({ status: "ok" }));
-  // Projected, never the raw runtime. config.runtime carries the Intelligence contract, including
-  // INTELLIGENCE_API_KEY and the licence token, and this endpoint is reachable by anyone. Returning
-  // the object wholesale would serve deployment secrets to the browser. Add fields here explicitly.
+  // Projected, never the raw config: this endpoint is reachable by anyone. Add fields here
+  // explicitly.
   app.get("/api/capabilities", async (context) =>
     context.json({
       mode: config.runtime.mode,
@@ -596,6 +597,32 @@ export function createApp(
   // The CopilotKit runtime, behind the same session guard as every other API route. Mounted last so
   // its own routing under /api/copilotkit cannot shadow an OpenBot route declared above.
   if (copilotHandler) {
+    /*
+     * The runtime's thread endpoints are not scoped to a person: in SSE mode the runtime has no
+     * identity of its own, so GET /threads would list everyone's and GET /threads/:id/messages would
+     * answer for any id. Scoping happens here, before the handler sees the request. The list is
+     * refused outright (the product lists channels, never raw threads); anything under a thread id
+     * must belong to the caller, and "not yours" is indistinguishable from "does not exist".
+     */
+    app.use("/api/copilotkit/threads", requireUser, async (context) =>
+      context.json({ error: "Not found." }, 404),
+    );
+    app.use(
+      "/api/copilotkit/threads/:threadId/*",
+      requireUser,
+      async (context, next) => {
+        const actor = context.var.actor;
+        const threadId = context.req.param("threadId") ?? "";
+        if (
+          !actor ||
+          !threadStore ||
+          !(await threadStore.hasThread(threadId, actor.id))
+        ) {
+          return context.json({ error: "Not found." }, 404);
+        }
+        return next();
+      },
+    );
     // Mounted at the ROOT with the handler carrying its own basePath. Mounting it at
     // "/api/copilotkit" as well double-prefixes it: Hono strips the prefix before the handler sees
     // the path, so every route lands at /api/copilotkit/api/copilotkit/* and /info 404s. The browser
@@ -824,14 +851,9 @@ export function createApp(
       createThreadRoutes(
         threadIdentity,
         requireUser,
-        // config.ts refuses to boot without the full Intelligence contract (see copilot.ts's
-        // header comment), so `config.runtime.intelligence` is never missing here. Built from it
-        // rather than assumed, though: this is the one place besides the runtime mount itself that
-        // needs to reach Intelligence, and it should keep working unmodified if that guarantee ever
-        // loosens and a deployment can legitimately have no reader to build.
-        createThreadReader(
-          createIntelligenceClient(config.runtime.intelligence),
-        ),
+        // Absent a thread store (tests that build the app without one), the route answers
+        // "unknown reader" and the browser starts a fresh thread, which is the safe side.
+        threadStore ? createThreadReader(threadStore) : undefined,
       ),
     );
   }
