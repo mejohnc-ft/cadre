@@ -107,3 +107,22 @@ was. The channel, its history and the audit trail never move; they were never on
 
 The same is available to the web app at `/api/admin/nodes`, `/api/admin/nodes/enrollment-tokens`
 and `/api/admin/computers/:bot/move`.
+
+## A server of its own (Linux, always on)
+
+`scripts/install-server.sh` turns an Ubuntu/Debian machine on the tailnet into a complete
+deployment: PostgreSQL (pgvector, Docker, loopback, persistent volume), the API with the built web
+app on loopback, a supervisor for its computers, `systemd --user` units for all three, a nightly
+`pg_dump` timer, and `tailscale serve` publishing the app to the tailnet only.
+
+```sh
+rsync -az --exclude node_modules --exclude .git --exclude .env ~/slice-dev/slice/ ai:slice/
+ssh ai 'cd slice && scripts/install-server.sh --model-key <key> --model-base-url https://api.z.ai/api/coding/paas/v4 --cpus 8 --memory-gb 32'
+# → http://<machine>.<tailnet>.ts.net:8081
+```
+
+It runs single-user: every visitor on the tailnet is the administrator, which is right for a
+private tailnet of one person's devices and wrong for anything shared — set `GOOGLE_OAUTH_*` in
+`~/.slice/server.env` before inviting anyone. State: `~/.slice/{server.env,server-supervisor.env,
+backups,logs}` on the machine and the `slice-server-pgdata` Docker volume. Re-running the script
+upgrades in place. Restore: `docker exec -i slice-server-postgres pg_restore -U slice -d slice -c < dump`.
