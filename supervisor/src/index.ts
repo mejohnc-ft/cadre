@@ -1,15 +1,13 @@
 import { serve } from "bun";
 import type { Context } from "hono";
 import { Hono } from "hono";
+import * as apple from "./apple";
+import { AppleContainerUnavailableError } from "./apple";
+import * as dockerBackend from "./docker";
 import {
   ComputerNotAnsweringError,
   DockerUnavailableError,
-  ensure,
-  listOwned,
   NameHeldError,
-  reachable,
-  reset,
-  stop,
 } from "./docker";
 import { registerEntry } from "./identity";
 import { namesFor } from "./names";
@@ -53,6 +51,36 @@ if (!token) {
   );
   process.exit(1);
 }
+/**
+ * Which runtime makes computers: `docker` (containers, optionally gVisor) or `apple` (one
+ * lightweight VM per computer via Apple's `container` CLI, macOS on Apple silicon). The verbs are
+ * identical; nothing above this line knows which is running.
+ */
+const backendName = (process.env.COMPUTER_BACKEND ?? "docker").trim();
+if (backendName !== "docker" && backendName !== "apple") {
+  console.error(
+    `COMPUTER_BACKEND must be "docker" or "apple", not "${backendName}".`,
+  );
+  process.exit(1);
+}
+const backend =
+  backendName === "apple"
+    ? {
+        ensure: apple.ensure,
+        stop: apple.stop,
+        reset: apple.reset,
+        listOwned: apple.listOwned,
+        reachable: apple.reachable,
+      }
+    : {
+        ensure: dockerBackend.ensure,
+        stop: dockerBackend.stop,
+        reset: dockerBackend.reset,
+        listOwned: dockerBackend.listOwned,
+        reachable: dockerBackend.reachable,
+      };
+const { ensure, stop, reset, listOwned, reachable } = backend;
+
 const image = process.env.COMPUTER_IMAGE ?? "openbot-agent-computer:latest";
 const network = process.env.COMPUTER_NETWORK;
 const runtime = process.env.COMPUTER_RUNTIME;
@@ -115,6 +143,7 @@ app.use("*", async (context, next) => {
 const health = async (context: Context) =>
   context.json({
     status: "ok",
+    backend: backendName,
     docker: await reachable(),
     // The contract this supervisor speaks. A server that needs a capability asks this, not the
     // version of the package.
@@ -224,6 +253,7 @@ computers.post("/computers/:botId/ensure", async (context) => {
     // ask again. The message is what differs, and it is the part an operator acts on.
     if (
       error instanceof DockerUnavailableError ||
+      error instanceof AppleContainerUnavailableError ||
       error instanceof ComputerNotAnsweringError
     ) {
       return context.json({ error: error.message }, 503);
@@ -239,7 +269,10 @@ computers.post("/computers/:botId/stop", async (context) => {
     const stopped = await stop(parsed.names);
     return context.json({ stopped });
   } catch (error) {
-    if (error instanceof DockerUnavailableError) {
+    if (
+      error instanceof DockerUnavailableError ||
+      error instanceof AppleContainerUnavailableError
+    ) {
       return context.json({ error: error.message }, 503);
     }
     throw error;
@@ -253,7 +286,10 @@ computers.post("/computers/:botId/reset", async (context) => {
     const wasThere = await reset(parsed.names);
     return context.json({ reset: wasThere });
   } catch (error) {
-    if (error instanceof DockerUnavailableError) {
+    if (
+      error instanceof DockerUnavailableError ||
+      error instanceof AppleContainerUnavailableError
+    ) {
       return context.json({ error: error.message }, 503);
     }
     throw error;
@@ -264,7 +300,10 @@ computers.get("/computers", async (context) => {
   try {
     return context.json({ computers: await listOwned() });
   } catch (error) {
-    if (error instanceof DockerUnavailableError) {
+    if (
+      error instanceof DockerUnavailableError ||
+      error instanceof AppleContainerUnavailableError
+    ) {
       return context.json({ error: error.message }, 503);
     }
     throw error;

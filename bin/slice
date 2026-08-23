@@ -1,0 +1,3 @@
+#!/bin/sh
+# slice CLI shim. Uses the repo-pinned Bun.
+exec "/Users/mejohnc/.bun/bin/bun" "/Users/mejohnc/slice-dev/slice/cli/slice.ts" "$@"

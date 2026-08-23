@@ -53,3 +53,26 @@ then delete the line from `.env` and restart the API.
 
 With the stack up: `OPENBOT_SMOKE=1 bun test tests/smoke` drives navigate → screenshot → audit →
 deny rule → refusal against the real deployment.
+
+## The Apple-VM shape (no Docker, no web app)
+
+Every computer — and PostgreSQL — runs in its own lightweight VM via Apple `container`
+(macOS 26, Apple silicon). The web app is optional.
+
+```sh
+export PATH="$HOME/slice-dev/slice/bin:$PATH"
+slice init --cpus 4 --memory-gb 8   # dedicate a slice of this Mac; writes ~/.slice/slice.env
+# put a model key in ~/.slice/slice.env, then:
+slice up
+slice chat general-assistant "hello"
+slice status                        # includes live slice utilization
+slice audit
+slice down                          # volumes (workspaces, browser profiles, database) survive
+```
+
+The supervisor is the same one Docker uses, started with `COMPUTER_BACKEND=apple`. First run needs
+the computer image in the VM runtime: `docker save openbot-agent-computer:latest | container image load -i -`
+(or build it there). The web UI works on top of this stack too — start `bun run dev` in `app/`.
+
+Known limit: `slice chat` covers text and server-side tools; browser tasks still need the web
+surface, whose pages execute the computer tools. Teaching the CLI to execute them is on the list.

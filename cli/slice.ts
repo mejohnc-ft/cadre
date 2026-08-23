@@ -1,0 +1,461 @@
+#!/usr/bin/env bun
+/**
+ * `slice` — the local Mac shape, no web app and no Docker required.
+ *
+ * One machine, everything in Apple `container` VMs except the server itself: PostgreSQL in a VM
+ * with a persistent volume, the supervisor on the host driving the Apple backend, the API server
+ * on the host bound to loopback. The web app is optional; `slice chat` talks to the same API the
+ * browser would.
+ *
+ * State lives in ~/.slice: the generated secrets, logs, and nothing else. The database is a
+ * container volume; the computers' workspaces are container volumes; deleting ~/.slice loses only
+ * configuration.
+ *
+ * Commands:
+ *   slice init                 write ~/.slice/slice.env with generated secrets and the slice budget
+ *   slice up                   start postgres VM, migrations, supervisor, server
+ *   slice down                 stop them
+ *   slice status               what is running, and the slice's capacity
+ *   slice agents               the coworkers this deployment has
+ *   slice chat <bot> <text>    one governed turn, streamed to the terminal
+ *   slice audit [n]            the latest audit rows
+ */
+
+import { parseArgs } from "node:util";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
+
+const HOME = join(homedir(), ".slice");
+const ENV_FILE = join(HOME, "slice.env");
+const LOGS = join(HOME, "logs");
+const REPO = resolve(import.meta.dir, "..");
+
+const SERVER_PORT = 3001;
+const SUPERVISOR_PORT = 4600;
+const POSTGRES_PORT = 5433;
+const POSTGRES_VM = "slice-postgres";
+const POSTGRES_VOLUME = "slice-pgdata";
+const POSTGRES_IMAGE = "docker.io/pgvector/pgvector:pg17";
+const DATABASE_URL = `postgres://slice:slice@127.0.0.1:${POSTGRES_PORT}/slice`;
+
+function fail(message: string): never {
+  console.error(`\x1b[31m${message}\x1b[0m`);
+  process.exit(1);
+}
+
+function info(message: string) {
+  console.log(`\x1b[2m${message}\x1b[0m`);
+}
+
+async function sh(
+  cmd: string[],
+  opts: { env?: Record<string, string>; cwd?: string } = {},
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  const proc = Bun.spawn(cmd, {
+    cwd: opts.cwd ?? REPO,
+    env: { ...process.env, ...opts.env },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  return { code, stdout, stderr };
+}
+
+function loadEnv(): Record<string, string> {
+  if (!existsSync(ENV_FILE)) {
+    fail(`No ${ENV_FILE}. Run \`slice init\` first.`);
+  }
+  const env: Record<string, string> = {};
+  for (const line of readFileSync(ENV_FILE, "utf8").split("\n")) {
+    const match = line.match(/^([A-Z0-9_]+)=(.*)$/);
+    if (match?.[1] && match[2] !== undefined) env[match[1]] = match[2];
+  }
+  return env;
+}
+
+async function answering(url: string): Promise<boolean> {
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(2_000) });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function waitFor(url: string, what: string, seconds = 60): Promise<void> {
+  for (let i = 0; i < seconds * 2; i++) {
+    if (await answering(url)) {
+      info(`  ${what} ready`);
+      return;
+    }
+    await Bun.sleep(500);
+  }
+  fail(`${what} never became ready at ${url}. Logs: ${LOGS}`);
+}
+
+function randomSecret(): string {
+  return Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString(
+    "base64",
+  );
+}
+
+// ---------------------------------------------------------------- commands --
+
+async function init(args: string[]) {
+  const { values } = parseArgs({
+    args,
+    options: {
+      cpus: { type: "string", default: "4" },
+      "memory-gb": { type: "string", default: "8" },
+      force: { type: "boolean", default: false },
+    },
+  });
+  if (existsSync(ENV_FILE) && !values.force) {
+    fail(`${ENV_FILE} already exists. Pass --force to regenerate secrets.`);
+  }
+  mkdirSync(LOGS, { recursive: true });
+  const cpus = Number(values.cpus);
+  const memoryGb = Number(values["memory-gb"]);
+  if (!Number.isFinite(cpus) || cpus <= 0) fail("--cpus must be positive");
+  if (!Number.isFinite(memoryGb) || memoryGb <= 0) {
+    fail("--memory-gb must be positive");
+  }
+
+  const lines = [
+    "# Written by `slice init`. Secrets are local to this machine.",
+    `SLICE_CPUS=${cpus}`,
+    `SLICE_MEMORY_BYTES=${memoryGb * 1024 ** 3}`,
+    `SUPERVISOR_TOKEN=${randomSecret()}`,
+    `COMPUTER_TOKEN=${randomSecret()}`,
+    `KEY_ENCRYPTION_KEY=${randomSecret()}`,
+    `MANAGED_AGENT_TOKEN=${randomSecret()}`,
+    "OPENBOT_SINGLE_USER=true",
+    "COMPUTER_NAMESPACE=slice",
+    `DATABASE_URL=${DATABASE_URL}`,
+    "TENANT_PACKAGE_DIR=../examples/fintech",
+    "# Model access. Either set a key here or add one in the vault later.",
+    "OPENAI_API_KEY=",
+    "# For OpenAI-compatible providers (Z.ai, OpenRouter, vLLM, Ollama):",
+    "OPENAI_COMPATIBLE_BASE_URL=",
+    "OPENAI_BASE_URL=",
+    "",
+  ];
+  writeFileSync(ENV_FILE, lines.join("\n"), { mode: 0o600 });
+  console.log(`Wrote ${ENV_FILE}`);
+  console.log(
+    `Slice: ${cpus} cores / ${memoryGb} GiB dedicated to agents on this Mac.`,
+  );
+  console.log("Add a model key to that file (or the vault), then: slice up");
+}
+
+async function ensurePostgres(_env: Record<string, string>) {
+  const list = await sh(["container", "list", "--all", "--format", "json"]);
+  const vms = JSON.parse(list.stdout || "[]") as Array<{
+    configuration?: { id?: string };
+    status?: { state?: string };
+  }>;
+  const existing = vms.find((vm) => vm.configuration?.id === POSTGRES_VM);
+  if (existing?.status?.state === "running") {
+    info("  postgres already running");
+    return;
+  }
+  if (existing) await sh(["container", "delete", POSTGRES_VM]);
+  await sh(["container", "volume", "create", POSTGRES_VOLUME]);
+  const run = await sh([
+    "container",
+    "run",
+    "--detach",
+    "--name",
+    POSTGRES_VM,
+    "--cpus",
+    "1",
+    "--memory",
+    "1024M",
+    "--volume",
+    `${POSTGRES_VOLUME}:/var/lib/postgresql/data`,
+    "--publish",
+    `127.0.0.1:${POSTGRES_PORT}:5432`,
+    "--env",
+    "POSTGRES_USER=slice",
+    "--env",
+    "POSTGRES_PASSWORD=slice",
+    "--env",
+    "POSTGRES_DB=slice",
+    // A container volume mounts with a lost+found, and initdb refuses a non-empty mount point.
+    "--env",
+    "PGDATA=/var/lib/postgresql/data/pgdata",
+    POSTGRES_IMAGE,
+  ]);
+  if (run.code !== 0) {
+    fail(`postgres VM failed to start: ${run.stderr.trim()}`);
+  }
+  // Postgres has no HTTP health; wait for the TCP port to accept.
+  for (let i = 0; i < 120; i++) {
+    const probe = await sh([
+      "container",
+      "exec",
+      POSTGRES_VM,
+      "pg_isready",
+      "-U",
+      "slice",
+    ]);
+    if (probe.code === 0) {
+      info("  postgres ready");
+      return;
+    }
+    await Bun.sleep(500);
+  }
+  fail("postgres VM never became ready");
+}
+
+async function up() {
+  const env = loadEnv();
+  mkdirSync(LOGS, { recursive: true });
+
+  info("1/4 container services");
+  const status = await sh(["container", "system", "status"]);
+  if (status.code !== 0) {
+    const started = await sh(["container", "system", "start"]);
+    if (started.code !== 0) fail("`container system start` failed");
+  }
+
+  info("2/4 postgres");
+  await ensurePostgres();
+  const migrate = await sh(["bun", "run", "db:migrate"], {
+    cwd: join(REPO, "server"),
+    env: { DATABASE_URL: env.DATABASE_URL ?? DATABASE_URL },
+  });
+  if (migrate.code !== 0) {
+    fail(`migrations failed:\n${migrate.stderr.slice(-800)}`);
+  }
+  info("  migrations applied");
+
+  info("3/4 supervisor (apple backend)");
+  if (!(await answering(`http://127.0.0.1:${SUPERVISOR_PORT}/health`))) {
+    Bun.spawn(["bun", join(REPO, "supervisor/src/index.ts")], {
+      cwd: join(REPO, "supervisor"),
+      env: {
+        ...process.env,
+        ...env,
+        PORT: String(SUPERVISOR_PORT),
+        COMPUTER_BACKEND: "apple",
+      },
+      stdout: Bun.file(join(LOGS, "supervisor.log")),
+      stderr: Bun.file(join(LOGS, "supervisor.log")),
+    }).unref();
+  }
+  await waitFor(`http://127.0.0.1:${SUPERVISOR_PORT}/health`, "supervisor");
+
+  info("4/4 server");
+  if (!(await answering(`http://127.0.0.1:${SERVER_PORT}/api/capabilities`))) {
+    Bun.spawn(["bun", join(REPO, "server/src/index.ts")], {
+      cwd: join(REPO, "server"),
+      env: {
+        ...process.env,
+        ...env,
+        PORT: String(SERVER_PORT),
+        COMPUTER_SUPERVISOR_URL: `http://127.0.0.1:${SUPERVISOR_PORT}`,
+      },
+      stdout: Bun.file(join(LOGS, "server.log")),
+      stderr: Bun.file(join(LOGS, "server.log")),
+    }).unref();
+  }
+  await waitFor(
+    `http://127.0.0.1:${SERVER_PORT}/api/capabilities`,
+    "server",
+    90,
+  );
+
+  console.log("\nSlice is up.");
+  console.log(`  API      http://127.0.0.1:${SERVER_PORT}  (loopback only)`);
+  console.log(`  chat     slice chat general-assistant "hello"`);
+  console.log(`  audit    slice audit`);
+  console.log(`  logs     ${LOGS}`);
+}
+
+async function down() {
+  await sh(["pkill", "-f", "supervisor/src/index.ts"]);
+  await sh(["pkill", "-f", "server/src/index.ts"]);
+  await sh(["container", "stop", POSTGRES_VM]);
+  const list = await sh(["container", "list", "--format", "json"]);
+  const vms = JSON.parse(list.stdout || "[]") as Array<{
+    configuration?: { id?: string; labels?: Record<string, string> };
+  }>;
+  for (const vm of vms) {
+    if (vm.configuration?.labels?.["openbot.supervisor"] === "true") {
+      const id = vm.configuration?.id;
+      if (id) await sh(["container", "stop", id]);
+    }
+  }
+  console.log(
+    "Stopped. Workspaces, browser profiles and the database are volumes and survive.",
+  );
+}
+
+async function statusCmd() {
+  const env = loadEnv();
+  const parts: Array<[string, string, boolean]> = [
+    ["server", `http://127.0.0.1:${SERVER_PORT}/api/capabilities`, false],
+    ["supervisor", `http://127.0.0.1:${SUPERVISOR_PORT}/health`, false],
+  ];
+  for (const part of parts) part[2] = await answering(part[1]);
+  const pg = await sh(["container", "exec", POSTGRES_VM, "pg_isready"]);
+  console.log(`postgres    ${pg.code === 0 ? "up" : "down"}`);
+  for (const [name, , ok] of parts) {
+    console.log(`${name.padEnd(11)} ${ok ? "up" : "down"}`);
+  }
+  if (parts[1]?.[2]) {
+    const capacity = await fetch(
+      `http://127.0.0.1:${SUPERVISOR_PORT}/v1/capacity`,
+      { headers: { authorization: `Bearer ${env.SUPERVISOR_TOKEN}` } },
+    ).then((r) => r.json() as Promise<Record<string, unknown>>);
+    const used = capacity.used as
+      | { cpus: number; memoryBytes: number }
+      | undefined;
+    const budget = capacity.budget as
+      | { cpus?: number; memoryBytes?: number }
+      | undefined;
+    if (!used || !budget) {
+      console.log(
+        `slice       unavailable (${(capacity.error as string) ?? "no capacity report"})`,
+      );
+    } else {
+      console.log(
+        `slice       ${used.cpus}/${budget.cpus ?? "∞"} cores, ${(
+          used.memoryBytes / 1024 ** 3
+        ).toFixed(1)}/${
+          budget.memoryBytes ? (budget.memoryBytes / 1024 ** 3).toFixed(0) : "∞"
+        } GiB, ${((capacity.computers as unknown[]) ?? []).length} computer(s)`,
+      );
+    }
+  }
+}
+
+async function agents() {
+  const info_ = await fetch(
+    `http://127.0.0.1:${SERVER_PORT}/api/copilotkit/info`,
+  ).then((r) => r.json() as Promise<{ agents: Record<string, unknown> }>);
+  for (const id of Object.keys(info_.agents)) console.log(id);
+}
+
+async function chat(args: string[]) {
+  const [bot, ...rest] = args;
+  const text = rest.join(" ");
+  if (!bot || !text) fail('Usage: slice chat <bot> "message"');
+  const mint = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/threads/mint`, {
+    method: "POST",
+  }).then((r) => r.json() as Promise<{ threadId: string }>);
+  const response = await fetch(
+    `http://127.0.0.1:${SERVER_PORT}/api/copilotkit/agent/${encodeURIComponent(bot)}/run`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "text/event-stream",
+      },
+      body: JSON.stringify({
+        threadId: mint.threadId,
+        runId: crypto.randomUUID(),
+        messages: [{ id: crypto.randomUUID(), role: "user", content: text }],
+        tools: [],
+        context: [],
+        state: {},
+        forwardedProps: {},
+      }),
+    },
+  );
+  if (!response.ok || !response.body) {
+    fail(`run failed: ${response.status} ${await response.text()}`);
+  }
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for await (const chunk of response.body) {
+    buffer += decoder.decode(chunk, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.startsWith("data:")) continue;
+      try {
+        const event = JSON.parse(line.slice(5)) as {
+          type?: string;
+          delta?: string;
+          message?: string;
+          toolCallName?: string;
+        };
+        if (event.type === "TEXT_MESSAGE_CONTENT" && event.delta) {
+          process.stdout.write(event.delta);
+        } else if (event.type === "TOOL_CALL_START") {
+          process.stdout.write(`\x1b[2m[tool: ${event.toolCallName}]\x1b[0m`);
+        } else if (event.type === "RUN_ERROR") {
+          fail(`\nrun error: ${event.message}`);
+        }
+      } catch {}
+    }
+  }
+  process.stdout.write("\n");
+}
+
+async function audit(args: string[]) {
+  const limit = Number(args[0] ?? "15");
+  const rows = await fetch(
+    `http://127.0.0.1:${SERVER_PORT}/api/admin/audit-events?limit=${limit}`,
+  ).then(
+    (r) =>
+      r.json() as Promise<{
+        events: Array<{
+          createdAt: string;
+          eventType: string;
+          targetId: string | null;
+          payload?: Record<string, unknown>;
+        }>;
+      }>,
+  );
+  for (const event of rows.events ?? []) {
+    console.log(
+      `${event.createdAt}  ${event.eventType.padEnd(28)} ${event.targetId ?? ""}`,
+    );
+  }
+}
+
+// -------------------------------------------------------------------- main --
+
+const [command, ...rest] = process.argv.slice(2);
+switch (command) {
+  case "init":
+    await init(rest);
+    break;
+  case "up":
+    await up();
+    break;
+  case "down":
+    await down();
+    break;
+  case "status":
+    await statusCmd();
+    break;
+  case "agents":
+    await agents();
+    break;
+  case "chat":
+    await chat(rest);
+    break;
+  case "audit":
+    await audit(rest);
+    break;
+  default:
+    console.log(`slice — a personal agent control plane, on this Mac
+
+  slice init [--cpus 4] [--memory-gb 8]   dedicate a slice of this Mac to agents
+  slice up                                start everything (VMs for postgres and computers)
+  slice down                              stop everything; volumes survive
+  slice status                            what is running, and the slice's use
+  slice agents                            list coworkers
+  slice chat <bot> "message"              one governed turn in the terminal
+  slice audit [n]                         the latest audit rows`);
+    process.exit(command ? 1 : 0);
+}
