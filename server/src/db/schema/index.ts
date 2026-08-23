@@ -7,3 +7,4 @@ export * from "./plugins";
 export * from "./coworker";
 export * from "./threads";
 export * from "./mesh";
+export * from "./artifacts";

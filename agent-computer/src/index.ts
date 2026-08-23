@@ -820,6 +820,7 @@ serve<StreamData>({
         threadId?: unknown;
         runId?: unknown;
         messages?: unknown;
+        artifacts?: unknown;
         forwardedProps?: unknown;
       } | null;
       if (
@@ -833,6 +834,9 @@ serve<StreamData>({
         runId: body.runId,
         harness: request.headers.get("x-openbot-harness") ?? undefined,
         messages: Array.isArray(body.messages) ? (body.messages as never) : [],
+        artifacts: Array.isArray((body as { artifacts?: unknown }).artifacts)
+          ? ((body as { artifacts?: unknown }).artifacts as never)
+          : [],
         forwardedProps: (body.forwardedProps ?? {}) as Record<string, unknown>,
       });
     }

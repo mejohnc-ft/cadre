@@ -671,6 +671,64 @@ async function nodeJoin(args: string[]) {
   console.log(`Joined ${server} as node "${body.node?.id ?? id}".`);
 }
 
+/**
+ * Project a coworker's artifacts into a local directory, the way the computer projects them into
+ * its workspace: an instructions artifact becomes AGENTS.md (and CLAUDE.md), skills land in
+ * skills/. The answer to config sprawl on your own machine, from the same source of truth the
+ * cloud computers use.
+ *
+ * Writes into the target directory (default the current one). It never touches ~/.claude unless
+ * you pass --claude, and even then it backs up an existing CLAUDE.md first: your own global
+ * instructions are not something a sync should silently overwrite.
+ */
+async function syncCmd(args: string[]) {
+  const [bot] = args;
+  if (!bot) fail("Usage: slice sync <bot> [--into <dir>] [--claude]");
+  const { values } = parseArgs({
+    args: args.slice(1),
+    options: { into: { type: "string" }, claude: { type: "boolean" } },
+  });
+  const artifacts = (await fetch(
+    `http://127.0.0.1:${SERVER_PORT}/api/admin/agents/${encodeURIComponent(bot)}/artifacts`,
+  ).then((r) => r.json())) as {
+    artifacts: Array<{ id: string; kind: string; name: string }>;
+  };
+  const into = values.into ? resolve(values.into) : process.cwd();
+  mkdirSync(join(into, "skills"), { recursive: true });
+  const written: string[] = [];
+  for (const meta of artifacts.artifacts ?? []) {
+    const full = (await fetch(
+      `http://127.0.0.1:${SERVER_PORT}/api/admin/artifacts/${encodeURIComponent(meta.id)}`,
+    ).then((r) => r.json())) as { artifact?: { content: string } };
+    const content = full.artifact?.content ?? "";
+    if (meta.kind === "instructions") {
+      writeFileSync(join(into, "AGENTS.md"), content);
+      written.push(join(into, "AGENTS.md"));
+      if (values.claude) {
+        const target = join(homedir(), ".claude", "CLAUDE.md");
+        mkdirSync(join(homedir(), ".claude"), { recursive: true });
+        if (existsSync(target)) {
+          const backup = `${target}.slice-backup`;
+          writeFileSync(backup, readFileSync(target));
+          console.log(`  backed up your existing CLAUDE.md → ${backup}`);
+        }
+        writeFileSync(target, content);
+        written.push(target);
+      }
+    } else if (meta.kind === "skill") {
+      const name = meta.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      const path = join(into, "skills", `${name}.md`);
+      writeFileSync(path, content);
+      written.push(path);
+    }
+  }
+  console.log(
+    written.length
+      ? `Synced from ${bot}:\n  ${written.join("\n  ")}`
+      : `No instructions or skill artifacts attached to ${bot}.`,
+  );
+}
+
 async function moveCmd(args: string[]) {
   const [bot, node] = args;
   if (!bot || !node) fail("Usage: slice move <bot> <node-id|local>");
@@ -733,6 +791,9 @@ switch (command) {
   case "move":
     await moveCmd(rest);
     break;
+  case "sync":
+    await syncCmd(rest);
+    break;
   default:
     console.log(`slice — a personal agent control plane, on this Mac
 
@@ -746,6 +807,7 @@ switch (command) {
   slice nodes                             every machine in the mesh, with capacity
   slice node token                        mint a one-time enrollment token (run here)
   slice node join <server> <token> ...    join this machine to a deployment (run on the node)
-  slice move <bot> <node|local>           carry a Bot's computer to another node`);
+  slice move <bot> <node|local>           carry a Bot's computer to another node
+  slice sync <bot> [--into dir]           project a coworker's artifacts into ~/.claude and ./AGENTS.md`);
     process.exit(command ? 1 : 0);
 }

@@ -29,6 +29,8 @@ import { createThreadRoutes } from "./channels/thread-routes";
 import { createThreadReader } from "./channels/thread-status";
 import type { ComputerProvider } from "./computer/provider";
 import type { ActionPolicy } from "./computer/policy";
+import { createArtifactRoutes } from "./artifacts/routes";
+import type { ArtifactStore } from "./artifacts/store";
 import { createHarnessRoutes } from "./harness/routes";
 import type { MeshProvider } from "./mesh/provider";
 import { createMeshRoutes } from "./mesh/routes";
@@ -173,6 +175,8 @@ export function createApp(
     policy: () => ActionPolicy;
     audit: AuditStore;
   },
+  /** The artifact registry, when this deployment has one. */
+  artifactStore?: ArtifactStore,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -667,6 +671,13 @@ export function createApp(
   // the one shape of this feature that must not exist.
   if (harness) {
     app.route("/api", createHarnessRoutes(harness));
+  }
+
+  if (artifactStore) {
+    app.route(
+      "/api",
+      createArtifactRoutes({ store: artifactStore, requireUser }),
+    );
   }
 
   if (mesh) {

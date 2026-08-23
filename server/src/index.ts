@@ -35,6 +35,7 @@ import { bindAddresses, loadConfig } from "./config";
 import { createMeshProvider } from "./mesh/provider";
 import { createNodeStore, createPlacementStore } from "./mesh/store";
 import type { SupervisorProvider } from "./computer/supervisor";
+import { createArtifactStore } from "./artifacts/store";
 import { PostgresAgentRunner } from "./runtime/postgres-runner";
 import {
   actorForAgent,
@@ -215,6 +216,7 @@ const localProvider = config.computer
  * of its own still places Bots on the nodes that have them.
  */
 const nodeStore = createNodeStore(database, config.keyEncryptionKey);
+const artifactStore = createArtifactStore(database);
 const placementStore = createPlacementStore(database);
 const computerProvider = createMeshProvider({
   ...(localProvider && "bundle" in localProvider
@@ -537,6 +539,7 @@ const app = createApp(
       ...(config.computer?.token
         ? { computerToken: config.computer.token }
         : {}),
+      artifactsFor: (botId) => artifactStore.resolveForRun(botId),
     },
   ),
   // The only path to an acting call.
@@ -577,6 +580,7 @@ const app = createApp(
     policy: () => policyStore.get(),
     audit: createAuditStore(database),
   },
+  artifactStore,
 );
 
 /**

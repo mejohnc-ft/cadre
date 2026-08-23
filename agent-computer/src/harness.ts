@@ -35,11 +35,13 @@ export type HarnessOptions = {
 };
 
 type AgUiMessage = { id?: string; role?: string; content?: unknown };
+type Artifact = { kind: string; name: string; content: string };
 type RunInput = {
   threadId: string;
   runId: string;
   harness?: string;
   messages?: AgUiMessage[];
+  artifacts?: Artifact[];
   forwardedProps?: Record<string, unknown>;
 };
 
@@ -197,6 +199,11 @@ export function createHarness(options: HarnessOptions) {
         }
 
         if (adapter.id === "pi") piModelsFile();
+        projectArtifacts(
+          options.workspaceDir,
+          adapter.id,
+          input.artifacts ?? [],
+        );
 
         const invocation = adapter.invoke({
           prompt,
@@ -342,6 +349,40 @@ async function versionOf(binary: string): Promise<string | null> {
     return (await proc.exited) === 0 ? version : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Write a profile's artifacts into the computer's workspace before the engine starts.
+ *
+ * One instructions artifact projects to the file the engine reads on its own — CLAUDE.md for
+ * Claude Code, AGENTS.md for Pi and OpenCode — so a coworker's role is written once and honoured by
+ * whichever harness runs it. Skills land under .slice/skills; harness settings and mcp configs are
+ * left to the per-run config the adapters already write. Overwritten each run, so editing an
+ * artifact takes effect on the next turn.
+ */
+function projectArtifacts(
+  workspaceDir: string,
+  harnessId: string,
+  artifacts: Artifact[],
+): void {
+  const instructionsFile =
+    harnessId === "claude-code" ? "CLAUDE.md" : "AGENTS.md";
+  const skillsDir = join(workspaceDir, ".slice", "skills");
+  for (const artifact of artifacts) {
+    try {
+      if (artifact.kind === "instructions") {
+        writeFileSync(join(workspaceDir, instructionsFile), artifact.content);
+      } else if (artifact.kind === "skill") {
+        mkdirSync(skillsDir, { recursive: true });
+        writeFileSync(
+          join(skillsDir, `${safe(artifact.name)}.md`),
+          artifact.content,
+        );
+      }
+    } catch {
+      // A single unwritable artifact should not fail the run.
+    }
   }
 }
 

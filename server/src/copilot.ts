@@ -218,9 +218,17 @@ export function registeredAgentFromRow(
  */
 type PlainFetch = (url: string, init: RequestInit) => Promise<Response>;
 
+export type HarnessArtifact = {
+  kind: string;
+  name: string;
+  content: string;
+};
+
 export type HarnessRuntime = {
   locate: (botId: string) => Promise<string>;
   computerToken?: string;
+  /** The profile's artifacts, resolved for this run; written into the workspace by the computer. */
+  artifactsFor?: (botId: string) => Promise<HarnessArtifact[]>;
 };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -560,7 +568,20 @@ function remoteAgentWithStandingRole(
     }
     headers.set("x-openbot-bot-id", agent.id);
     if (agent.harness) headers.set("x-openbot-harness", agent.harness);
-    return watched(`${base}/harness/run`, { ...init, headers });
+    // The profile's artifacts ride in the run body; the computer writes them into the workspace
+    // before the engine starts, so a coworker's instructions and skills reach whichever harness.
+    let body = init?.body;
+    if (harnessRuntime.artifactsFor && typeof body === "string") {
+      try {
+        const artifacts = await harnessRuntime.artifactsFor(agent.id);
+        if (artifacts.length > 0) {
+          body = JSON.stringify({ ...JSON.parse(body), artifacts });
+        }
+      } catch {
+        // A failure to attach artifacts must not fail the run; the engine runs without them.
+      }
+    }
+    return watched(`${base}/harness/run`, { ...init, headers, body });
   };
   const remote = new HttpAgent({
     url: agent.endpoint,

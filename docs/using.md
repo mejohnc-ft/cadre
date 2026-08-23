@@ -149,3 +149,23 @@ slice chat claude-code "Create notes.md with hello, then run ls -la"
 slice chat --thread <id> claude-code "What did you create earlier?"    # resumes the session
 # Boundaries apply: deny ["tool.name == \"harness_Bash\""] and the shell is refused, audited.
 ```
+
+## Artifacts: a coworker's instructions, written once
+
+An **artifact** is a versioned unit of context — an instructions file, a skill — held once and
+attached to profiles. An instructions artifact is projected into a harness's workspace at run
+start as the file that engine reads on its own: `CLAUDE.md` for Claude Code, `AGENTS.md` for Pi and
+OpenCode. Write the role once; every engine honours it.
+
+```sh
+# Create an instructions artifact and attach it to a coworker:
+curl -s localhost:3001/api/admin/artifacts -H 'content-type: application/json' \
+  -d '{"kind":"instructions","name":"House style","content":"Always cite sources."}'
+curl -s localhost:3001/api/admin/agents/claude-code/artifacts -H 'content-type: application/json' \
+  -d '{"artifactId":"<id>"}'
+# Editing appends a version (POST .../versions); a profile follows latest or pins a version.
+
+# Project a coworker's artifacts into a local project (config-sprawl fix):
+slice sync claude-code                 # writes ./AGENTS.md and ./skills/
+slice sync claude-code --claude        # also ~/.claude/CLAUDE.md (backs up an existing one first)
+```
