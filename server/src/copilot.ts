@@ -48,26 +48,22 @@ export type IdentifyUser = (
 /**
  * Which model a built-in Bot speaks to.
  *
- * The runtime resolves `"openai/<model>"` itself, but through OpenAI's Responses API, which only
- * OpenAI serves. Every OpenAI-compatible provider — Z.ai, OpenRouter, a vLLM or Ollama box, a
- * corporate gateway — speaks `/chat/completions` and nothing else, so a deployment that set
- * `OPENAI_BASE_URL` to one of those 404'd on the first turn. When the base URL points anywhere but
- * OpenAI, the model is built here on the chat-completions path; otherwise the runtime's own
+ * The runtime resolves `"openai/<model>"` itself, through OpenAI's Responses API, which only OpenAI
+ * serves. Every OpenAI-compatible provider — Z.ai, OpenRouter, a vLLM or Ollama box, a corporate
+ * gateway — speaks `/chat/completions` and nothing else. A deployment that names one in
+ * `compatibleBaseUrl` gets its model built here on that path; otherwise the runtime's own
  * resolution stands and nothing changes for a stock deployment.
  */
 function languageModel(
   model: RuntimeModel,
   apiKey: string,
 ): BuiltInAgentClassicConfig["model"] {
-  const baseURL = process.env.OPENAI_BASE_URL?.trim();
-  const compatible =
-    model.provider === "openai" &&
-    baseURL &&
-    !/^https:\/\/api\.openai\.com(\/|$)/.test(baseURL);
-  if (!compatible) return `${model.provider}/${model.defaultModel}`;
+  if (!model.compatibleBaseUrl) {
+    return `${model.provider}/${model.defaultModel}`;
+  }
   // The runtime's `LanguageModel` is the `ai` package's; the provider returns the same object
   // through `@ai-sdk/provider`, and the two copies in the tree disagree only on the type name.
-  return createOpenAI({ apiKey, baseURL }).chat(
+  return createOpenAI({ apiKey, baseURL: model.compatibleBaseUrl }).chat(
     model.defaultModel,
   ) as unknown as BuiltInAgentClassicConfig["model"];
 }
@@ -151,6 +147,11 @@ export function standingRoleMessage(
 export type RuntimeModel = {
   provider: "openai";
   defaultModel: string;
+  /**
+   * An OpenAI-compatible endpoint to reach the model through instead of OpenAI. Set, built-in
+   * Bots speak chat-completions to it; see `languageModel`.
+   */
+  compatibleBaseUrl?: string;
 };
 
 type RuntimeAgentRow = {

@@ -101,6 +101,11 @@ export type DeploymentConfig = {
    */
   deploymentId: string | undefined;
   /**
+   * An OpenAI-compatible chat-completions endpoint for the built-in Bots' model, such as Z.ai,
+   * OpenRouter or a local vLLM/Ollama. Absent, the model is reached through OpenAI itself.
+   */
+  openAiCompatibleBaseUrl: string | undefined;
+  /**
    * Where this deployment is reached from outside, with no trailing slash.
    *
    * Needed because an OAuth redirect URI has to match what an administrator registered with the
@@ -589,6 +594,12 @@ export function loadConfig(
     tenantPackageDirectory:
       optional(environment, "TENANT_PACKAGE_DIR") ?? "../examples/fintech",
     runtime: runtimeCapabilities(),
+    openAiCompatibleBaseUrl: optionalHttpUrl(
+      environment,
+      "OPENAI_COMPATIBLE_BASE_URL",
+    )
+      ?.toString()
+      .replace(/\/+$/, ""),
     agentStallTimeoutMs: agentStallTimeoutMs(environment),
     auditRetentionDays: auditRetentionDays(environment),
     oauth: { google },

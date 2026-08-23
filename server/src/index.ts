@@ -419,7 +419,12 @@ const app = createApp(
   // functions are how a run is attributed to a person.
   mountCopilotRuntime(
     config,
-    tenantPackage.model,
+    {
+      ...tenantPackage.model,
+      ...(config.openAiCompatibleBaseUrl
+        ? { compatibleBaseUrl: config.openAiCompatibleBaseUrl }
+        : {}),
+    },
     loadAgentsForActor,
     () =>
       resolveModelApiKey({
