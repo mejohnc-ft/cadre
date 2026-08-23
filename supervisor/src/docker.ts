@@ -350,6 +350,11 @@ export type EnsureOptions = {
    */
   cpus?: number;
   /**
+   * The address a computer's port is published on. Loopback by default; a node whose computers
+   * are driven by a server elsewhere on the tailnet publishes on its tailnet address.
+   */
+  publishHost?: string;
+  /**
    * How long a started computer is given to answer before the attempt is called a failure.
    *
    * Configurable because the wait now fails rather than returning, so the number decides when a slow
@@ -397,7 +402,9 @@ function hostConfig(names: ComputerNames, options: EnsureOptions) {
           // the computer requires is the control; this keeps the surface off the network as well,
           // because both is the right number of locks on a browser holding somebody's logins.
           PortBindings: {
-            [COMPUTER_PORT]: [{ HostIp: "127.0.0.1", HostPort: "" }],
+            [COMPUTER_PORT]: [
+              { HostIp: options.publishHost ?? "127.0.0.1", HostPort: "" },
+            ],
           },
         }),
     RestartPolicy: { Name: "unless-stopped" },

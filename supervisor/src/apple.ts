@@ -101,6 +101,14 @@ function portOf(vm: ListedVm): number | undefined {
   return published?.hostPort;
 }
 
+function publishHostOf(vm: ListedVm): string {
+  const published = vm.configuration?.publishedPorts?.find(
+    (port) => port.containerPort === 4100,
+  );
+  const host = published?.hostAddress;
+  return host && host !== "0.0.0.0" ? host : "127.0.0.1";
+}
+
 function stateOf(vm: ListedVm): ComputerState {
   const labels = vm.configuration?.labels;
   const port = portOf(vm);
@@ -110,7 +118,7 @@ function stateOf(vm: ListedVm): ComputerState {
     container: vm.configuration?.id ?? "unknown",
     status: vm.status?.state ?? "unknown",
     ...(reservation ? { reservation } : {}),
-    ...(port ? { port, url: `http://127.0.0.1:${port}` } : {}),
+    ...(port ? { port, url: `http://${publishHostOf(vm)}:${port}` } : {}),
     ...(vm.status?.startedDate ? { startedAt: vm.status.startedDate } : {}),
   };
 }
@@ -250,7 +258,7 @@ export async function ensure(
     "--volume",
     `${names.profileVolume}:/profiles`,
     "--publish",
-    `127.0.0.1:${port}:4100`,
+    `${options.publishHost ?? "127.0.0.1"}:${port}:4100`,
     ...options.environment.flatMap((entry) => ["--env", entry]),
     options.image,
   ];

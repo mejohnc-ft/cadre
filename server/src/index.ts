@@ -32,6 +32,9 @@ import {
 } from "./computer/provider";
 import { createSnapshotStore } from "./computer/snapshot-store";
 import { bindAddresses, loadConfig } from "./config";
+import { createMeshProvider } from "./mesh/provider";
+import { createNodeStore, createPlacementStore } from "./mesh/store";
+import type { SupervisorProvider } from "./computer/supervisor";
 import { PostgresAgentRunner } from "./runtime/postgres-runner";
 import {
   actorForAgent,
@@ -198,9 +201,25 @@ const auth = config.auth
       signInAuditStore,
     )
   : undefined;
-const computerProvider = config.computer
+const localProvider = config.computer
   ? createComputerProvider(config.computer)
   : undefined;
+/*
+ * The mesh: this machine's supervisor plus every enrolled node, behind one provider. The gateway
+ * and everything above it see a single provider; where a Bot's computer actually is comes from
+ * the placement table. Built even with no local supervisor, because a server with no computers
+ * of its own still places Bots on the nodes that have them.
+ */
+const nodeStore = createNodeStore(database, config.keyEncryptionKey);
+const placementStore = createPlacementStore(database);
+const computerProvider = createMeshProvider({
+  ...(localProvider && "bundle" in localProvider
+    ? { local: localProvider as SupervisorProvider }
+    : {}),
+  nodes: nodeStore,
+  placements: placementStore,
+  audit: createAuditStore(database),
+});
 
 if (computerProvider?.warm) {
   void computerProvider.warm();
@@ -536,6 +555,11 @@ const app = createApp(
   intentRouter,
   threadRunner,
   computerProvider,
+  {
+    nodes: nodeStore,
+    provider: computerProvider,
+    audit: createAuditStore(database),
+  },
 );
 
 /**

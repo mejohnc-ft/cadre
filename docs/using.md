@@ -76,3 +76,29 @@ the computer image in the VM runtime: `docker save openbot-agent-computer:latest
 
 Known limit: `slice chat` covers text and server-side tools; browser tasks still need the web
 surface, whose pages execute the computer tools. Teaching the CLI to execute them is on the list.
+
+## The mesh: more than one machine
+
+A deployment is one server and any number of nodes. A node is a machine running a supervisor
+(`slice up` starts one) that the server can reach over the tailnet.
+
+```sh
+# On the server (this Mac, today):
+slice node token                     # prints a single-use token, valid 30 minutes
+slice nodes                          # every node with live capacity
+
+# On the machine joining (its supervisor must publish on its tailnet address):
+COMPUTER_PUBLISH_HOST=<its tailnet ip> slice up
+slice node join http://<server>:3001 <token> --supervisor-url http://<its tailnet ip>:4600 --backend docker
+
+# Back on the server: carry a Bot's computer — workspace and browser profile — to a node.
+slice move general-assistant <node-id>
+slice move general-assistant local
+```
+
+A move exports the bundle from the source, ensures a computer on the target, restores it, stops
+the source, and only then records the placement — so a failure part-way leaves the Bot where it
+was. The channel, its history and the audit trail never move; they were never on a node.
+
+The same is available to the web app at `/api/admin/nodes`, `/api/admin/nodes/enrollment-tokens`
+and `/api/admin/computers/:bot/move`.

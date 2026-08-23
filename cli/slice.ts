@@ -517,6 +517,135 @@ async function audit(args: string[]) {
   }
 }
 
+// ---------------------------------------------------------------- the mesh --
+
+async function nodesCmd() {
+  const report = await fetch(
+    `http://127.0.0.1:${SERVER_PORT}/api/admin/nodes`,
+  ).then(
+    (r) =>
+      r.json() as Promise<{
+        nodes: Array<{
+          id: string;
+          name: string;
+          backend: string;
+          reachable: boolean;
+          placementEnabled: boolean;
+          capacity: {
+            used?: { cpus: number; memoryBytes: number };
+            budget?: { cpus?: number; memoryBytes?: number };
+            computers?: unknown[];
+          } | null;
+          error?: string;
+        }>;
+      }>,
+  );
+  for (const node of report.nodes) {
+    const used = node.capacity?.used;
+    const budget = node.capacity?.budget;
+    const use = used
+      ? `${used.cpus}/${budget?.cpus ?? "∞"} cores, ${(used.memoryBytes / 1024 ** 3).toFixed(1)}/${budget?.memoryBytes ? (budget.memoryBytes / 1024 ** 3).toFixed(0) : "∞"} GiB, ${node.capacity?.computers?.length ?? 0} computer(s)`
+      : node.reachable
+        ? "no capacity report"
+        : `unreachable: ${node.error ?? ""}`;
+    console.log(
+      `${node.id.padEnd(14)} ${node.name.padEnd(22)} ${node.backend.padEnd(18)} ${node.placementEnabled ? "open  " : "closed"} ${use}`,
+    );
+  }
+}
+
+/** Mint a one-time enrollment token here, for `slice node join` on the machine joining. */
+async function nodeToken() {
+  const minted = await fetch(
+    `http://127.0.0.1:${SERVER_PORT}/api/admin/nodes/enrollment-tokens`,
+    { method: "POST" },
+  ).then((r) => r.json() as Promise<{ token: string; expiresAt: string }>);
+  console.log(minted.token);
+  console.error(
+    `\x1b[2mValid until ${minted.expiresAt}, single use. On the node:\n  slice node join <server-url> ${minted.token} --supervisor-url http://<tailnet-ip>:4600\x1b[0m`,
+  );
+}
+
+/**
+ * Join this machine to a deployment elsewhere. Runs on the node: its supervisor must already be up
+ * (`slice up` starts one) and reachable from the server at --supervisor-url.
+ */
+async function nodeJoin(args: string[]) {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: {
+      "supervisor-url": { type: "string" },
+      id: { type: "string" },
+      name: { type: "string" },
+      backend: { type: "string", default: "apple" },
+    },
+  });
+  const [server, token] = positionals;
+  if (!server || !token) {
+    fail(
+      "Usage: slice node join <server-url> <token> --supervisor-url <url> [--id slug] [--name text] [--backend apple|docker]",
+    );
+  }
+  const env = loadEnv();
+  const supervisorUrl = values["supervisor-url"];
+  if (!supervisorUrl)
+    fail(
+      "--supervisor-url is required: where the server reaches this node's supervisor.",
+    );
+  const id =
+    values.id ??
+    (await sh(["hostname", "-s"])).stdout
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, "-")
+      .slice(0, 40);
+  const response = await fetch(
+    `${server.replace(/\/$/, "")}/api/nodes/enroll`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        token,
+        id,
+        name: values.name ?? id,
+        supervisorUrl,
+        supervisorToken: env.SUPERVISOR_TOKEN,
+        backend: values.backend,
+      }),
+    },
+  );
+  const body = (await response.json().catch(() => ({}))) as {
+    error?: string;
+    node?: { id: string };
+  };
+  if (!response.ok) fail(`enrolment refused: ${body.error ?? response.status}`);
+  console.log(`Joined ${server} as node "${body.node?.id ?? id}".`);
+}
+
+async function moveCmd(args: string[]) {
+  const [bot, node] = args;
+  if (!bot || !node) fail("Usage: slice move <bot> <node-id|local>");
+  const response = await fetch(
+    `http://127.0.0.1:${SERVER_PORT}/api/admin/computers/${encodeURIComponent(bot)}/move`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ nodeId: node }),
+    },
+  );
+  const body = (await response.json().catch(() => ({}))) as {
+    error?: string;
+    from?: string;
+    to?: string;
+    bytes?: number;
+  };
+  if (!response.ok) fail(`move refused: ${body.error ?? response.status}`);
+  console.log(
+    `Moved ${bot}: ${body.from} → ${body.to} (${body.bytes} bytes of workspace and browser profile).`,
+  );
+}
+
 // -------------------------------------------------------------------- main --
 
 const [command, ...rest] = process.argv.slice(2);
@@ -542,6 +671,20 @@ switch (command) {
   case "audit":
     await audit(rest);
     break;
+  case "nodes":
+    await nodesCmd();
+    break;
+  case "node":
+    if (rest[0] === "token") await nodeToken();
+    else if (rest[0] === "join") await nodeJoin(rest.slice(1));
+    else
+      fail(
+        "Usage: slice node token | slice node join <server-url> <token> --supervisor-url <url>",
+      );
+    break;
+  case "move":
+    await moveCmd(rest);
+    break;
   default:
     console.log(`slice — a personal agent control plane, on this Mac
 
@@ -551,6 +694,10 @@ switch (command) {
   slice status                            what is running, and the slice's use
   slice agents                            list coworkers
   slice chat <bot> "message"              one governed turn in the terminal
-  slice audit [n]                         the latest audit rows`);
+  slice audit [n]                         the latest audit rows
+  slice nodes                             every machine in the mesh, with capacity
+  slice node token                        mint a one-time enrollment token (run here)
+  slice node join <server> <token> ...    join this machine to a deployment (run on the node)
+  slice move <bot> <node|local>           carry a Bot's computer to another node`);
     process.exit(command ? 1 : 0);
 }

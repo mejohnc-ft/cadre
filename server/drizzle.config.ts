@@ -24,6 +24,7 @@ export default defineConfig({
     "./src/db/schema/components.ts",
     "./src/db/schema/plugins.ts",
     "./src/db/schema/threads.ts",
+    "./src/db/schema/mesh.ts",
   ],
   out: "./drizzle",
   dbCredentials: {

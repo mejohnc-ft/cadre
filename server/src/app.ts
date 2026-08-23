@@ -28,6 +28,9 @@ import type { ThreadIdentity } from "./channels/thread-identity";
 import { createThreadRoutes } from "./channels/thread-routes";
 import { createThreadReader } from "./channels/thread-status";
 import type { ComputerProvider } from "./computer/provider";
+import type { MeshProvider } from "./mesh/provider";
+import { createMeshRoutes } from "./mesh/routes";
+import type { NodeStore } from "./mesh/store";
 import type { ThreadStore } from "./runtime/postgres-runner";
 import { createComponentRoutes } from "./components/routes";
 import type { SandboxedStore } from "./components/sandboxed";
@@ -160,6 +163,8 @@ export function createApp(
   threadStore?: ThreadStore,
   /** The computer provider, when this deployment has one; serves the slice capacity view. */
   computerProvider?: ComputerProvider,
+  /** The mesh, when this deployment can hold more than one node. Routes are built here so they share the session guard. */
+  mesh?: { nodes: NodeStore; provider: MeshProvider; audit: AuditStore },
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -652,6 +657,18 @@ export function createApp(
   // The Bot computer. Acting on a page needs the gateway and the policy it enforces, so both arrive
   // together or the routes are not mounted. An ungoverned computer is not a reduced feature. It is
   // the one shape of this feature that must not exist.
+  if (mesh) {
+    app.route(
+      "/api",
+      createMeshRoutes({
+        nodes: mesh.nodes,
+        mesh: mesh.provider,
+        audit: mesh.audit,
+        requireUser,
+      }),
+    );
+  }
+
   if (computerGateway && computerPolicy) {
     /*
      * The slice, for the people running this deployment. Registered before the computer routes so

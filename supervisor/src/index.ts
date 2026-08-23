@@ -89,6 +89,8 @@ const backend =
 const { ensure, stop, reset, listOwned, reachable, exec } = backend;
 
 const image = process.env.COMPUTER_IMAGE ?? "openbot-agent-computer:latest";
+/** Where computers' ports are published. A mesh node sets its tailnet address here. */
+const publishHost = process.env.COMPUTER_PUBLISH_HOST?.trim() || undefined;
 const network = process.env.COMPUTER_NETWORK;
 const runtime = process.env.COMPUTER_RUNTIME;
 /**
@@ -257,6 +259,7 @@ computers.post("/computers/:botId/ensure", async (context) => {
       ...(runtime ? { runtime } : {}),
       memoryBytes: perComputer.memoryBytes,
       cpus: perComputer.cpus,
+      ...(publishHost ? { publishHost } : {}),
       ...(spireSocketVolume ? { spireSocketVolume } : {}),
     });
     return context.json({

@@ -41,6 +41,19 @@ export type SupervisorOptions = {
   hostForPort?: (port: number) => string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /**
+   * Where this supervisor's computers are reached from here. A remote supervisor reports its
+   * computers on its own loopback; those URLs are rewritten to this host. Unset, URLs are used as
+   * reported, which is right for the supervisor on this machine.
+   */
+  publicHost?: string;
+};
+
+/** A supervisor client: a computer provider that can also carry state in and out. */
+export type SupervisorProvider = ComputerProvider & {
+  bundle(botId: string): Promise<Uint8Array>;
+  restore(botId: string, bundle: Uint8Array): Promise<void>;
+  health(): Promise<{ status?: string; backend?: string; contract?: string }>;
 };
 
 export class SupervisorError extends Error {
@@ -52,12 +65,59 @@ export class SupervisorError extends Error {
 
 export function createDockerSupervisorProvider(
   options: SupervisorOptions,
-): ComputerProvider {
+): SupervisorProvider {
   const doFetch = options.fetchImpl ?? fetch;
   const base = options.baseUrl.replace(/\/$/, "");
   const timeoutMs = options.timeoutMs ?? 120_000;
   const hostForPort =
     options.hostForPort ?? ((port) => `http://localhost:${port}`);
+
+  /** A URL a remote supervisor reported, made reachable from here. */
+  function reachable(url: string): string {
+    if (!options.publicHost) return url;
+    try {
+      const parsed = new URL(url);
+      if (
+        ["127.0.0.1", "localhost", "::1", "[::1]"].includes(parsed.hostname)
+      ) {
+        parsed.hostname = options.publicHost;
+        return parsed.toString().replace(/\/$/, "");
+      }
+    } catch {}
+    return url;
+  }
+
+  async function raw(
+    path: string,
+    init: RequestInit & { method: string },
+  ): Promise<Response> {
+    let response: Response;
+    try {
+      response = await doFetch(`${base}${path}`, {
+        ...init,
+        headers: {
+          ...(options.token
+            ? { authorization: `Bearer ${options.token}` }
+            : {}),
+          ...(init.headers ?? {}),
+        },
+        signal: AbortSignal.timeout(Math.max(timeoutMs, 300_000)),
+      });
+    } catch (error) {
+      throw new SupervisorError(
+        `The container supervisor at ${base} could not be reached (${error instanceof Error ? error.message : String(error)}).`,
+      );
+    }
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+      throw new SupervisorError(
+        body?.error ?? `The supervisor answered ${response.status}.`,
+      );
+    }
+    return response;
+  }
 
   async function call(path: string, method = "POST"): Promise<unknown> {
     let response: Response;
@@ -103,7 +163,7 @@ export function createDockerSupervisorProvider(
       status:
         computer.status.toLowerCase() === "running" ? "running" : "stopped",
       ...(computer.url
-        ? { url: computer.url }
+        ? { url: reachable(computer.url) }
         : computer.port
           ? { url: hostForPort(computer.port) }
           : {}),
@@ -155,6 +215,34 @@ export function createDockerSupervisorProvider(
       return call("/v1/capacity", "GET");
     },
 
+    async bundle(botId: string): Promise<Uint8Array> {
+      const response = await raw(
+        `/v1/computers/${encodeURIComponent(botId)}/bundle`,
+        { method: "GET" },
+      );
+      return new Uint8Array(await response.arrayBuffer());
+    },
+
+    async restore(botId: string, bundle: Uint8Array): Promise<void> {
+      await raw(`/v1/computers/${encodeURIComponent(botId)}/bundle`, {
+        method: "POST",
+        headers: { "content-type": "application/x-tar" },
+        body: bundle.buffer.slice(
+          bundle.byteOffset,
+          bundle.byteOffset + bundle.byteLength,
+        ) as ArrayBuffer,
+      });
+    },
+
+    async health() {
+      const response = await raw("/v1/health", { method: "GET" });
+      return (await response.json()) as {
+        status?: string;
+        backend?: string;
+        contract?: string;
+      };
+    },
+
     /**
      * The URL of this Bot's computer, starting it if it is not already up.
      *
@@ -180,7 +268,7 @@ export function createDockerSupervisorProvider(
       if (state?.startedAt) sessions.set(botId, state.startedAt);
       // The supervisor says where it is, because only it knows whether these computers sit on a
       // shared network or answer on a published port.
-      if (state?.url) return state.url;
+      if (state?.url) return reachable(state.url);
       if (state?.port) return hostForPort(state.port);
       throw new SupervisorError(
         `The computer for ${botId} started but reported no address, so it cannot be reached.`,

@@ -85,6 +85,10 @@ export const auditEventTypes = [
   "mcp.tools_discovered",
   "mcp.call_succeeded",
   "mcp.call_rejected",
+  /* The mesh: a machine joined or left, and a Bot's computer carried from one to another. */
+  "node.enrolled",
+  "node.removed",
+  "computer.moved",
   /*
    * A call this deployment permitted and the vendor did not complete.
    *
