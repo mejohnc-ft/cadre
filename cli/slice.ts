@@ -25,6 +25,7 @@ import { parseArgs } from "node:util";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { describeCall, executeTool, TOOL_DEFINITIONS } from "./computer-tools";
 
 const HOME = join(homedir(), ".slice");
 const ENV_FILE = join(HOME, "slice.env");
@@ -343,15 +344,33 @@ async function agents() {
   for (const id of Object.keys(info_.agents)) console.log(id);
 }
 
-async function chat(args: string[]) {
-  const [bot, ...rest] = args;
-  const text = rest.join(" ");
-  if (!bot || !text) fail('Usage: slice chat <bot> "message"');
-  const mint = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/threads/mint`, {
-    method: "POST",
-  }).then((r) => r.json() as Promise<{ threadId: string }>);
+type Message = {
+  id: string;
+  role: "user" | "assistant" | "tool";
+  content: string;
+  toolCalls?: Array<{
+    id: string;
+    type: "function";
+    function: { name: string; arguments: string };
+  }>;
+  toolCallId?: string;
+};
+
+type PendingCall = { id: string; name: string; arguments: string };
+
+/**
+ * One run: stream the Bot's events to the terminal and collect the tool calls it made. Returns the
+ * assistant text and the calls, so the caller can execute them and start the next run — the same
+ * loop the web page runs, which is what makes the terminal a surface rather than a shortcut.
+ */
+async function runOnce(
+  api: string,
+  bot: string,
+  threadId: string,
+  messages: Message[],
+): Promise<{ text: string; calls: PendingCall[] }> {
   const response = await fetch(
-    `http://127.0.0.1:${SERVER_PORT}/api/copilotkit/agent/${encodeURIComponent(bot)}/run`,
+    `${api}/api/copilotkit/agent/${encodeURIComponent(bot)}/run`,
     {
       method: "POST",
       headers: {
@@ -359,10 +378,10 @@ async function chat(args: string[]) {
         accept: "text/event-stream",
       },
       body: JSON.stringify({
-        threadId: mint.threadId,
+        threadId,
         runId: crypto.randomUUID(),
-        messages: [{ id: crypto.randomUUID(), role: "user", content: text }],
-        tools: [],
+        messages,
+        tools: TOOL_DEFINITIONS,
         context: [],
         state: {},
         forwardedProps: {},
@@ -374,27 +393,103 @@ async function chat(args: string[]) {
   }
   const decoder = new TextDecoder();
   let buffer = "";
+  let text = "";
+  const calls: PendingCall[] = [];
   for await (const chunk of response.body) {
     buffer += decoder.decode(chunk, { stream: true });
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? "";
     for (const line of lines) {
       if (!line.startsWith("data:")) continue;
+      let event: {
+        type?: string;
+        delta?: string;
+        message?: string;
+        toolCallId?: string;
+        toolCallName?: string;
+      };
       try {
-        const event = JSON.parse(line.slice(5)) as {
-          type?: string;
-          delta?: string;
-          message?: string;
-          toolCallName?: string;
-        };
-        if (event.type === "TEXT_MESSAGE_CONTENT" && event.delta) {
-          process.stdout.write(event.delta);
-        } else if (event.type === "TOOL_CALL_START") {
-          process.stdout.write(`\x1b[2m[tool: ${event.toolCallName}]\x1b[0m`);
-        } else if (event.type === "RUN_ERROR") {
-          fail(`\nrun error: ${event.message}`);
+        event = JSON.parse(line.slice(5));
+      } catch {
+        continue;
+      }
+      switch (event.type) {
+        case "TEXT_MESSAGE_CONTENT":
+          if (event.delta) {
+            text += event.delta;
+            process.stdout.write(event.delta);
+          }
+          break;
+        case "TOOL_CALL_START":
+          if (event.toolCallId && event.toolCallName) {
+            calls.push({
+              id: event.toolCallId,
+              name: event.toolCallName,
+              arguments: "",
+            });
+          }
+          break;
+        case "TOOL_CALL_ARGS": {
+          const call = calls.find((c) => c.id === event.toolCallId);
+          if (call && event.delta) call.arguments += event.delta;
+          break;
         }
+        case "RUN_ERROR":
+          fail(`\nrun error: ${event.message}`);
+      }
+    }
+  }
+  return { text, calls };
+}
+
+async function chat(args: string[]) {
+  const [bot, ...rest] = args;
+  const text = rest.join(" ");
+  if (!bot || !text) fail('Usage: slice chat <bot> "message"');
+  const api = `http://127.0.0.1:${SERVER_PORT}`;
+  const mint = await fetch(`${api}/api/threads/mint`, { method: "POST" }).then(
+    (r) => r.json() as Promise<{ threadId: string }>,
+  );
+  const messages: Message[] = [
+    { id: crypto.randomUUID(), role: "user", content: text },
+  ];
+
+  // The tool loop: a run that ends in tool calls is followed by one carrying their results, until
+  // the Bot answers in words. Capped so a Bot going in circles is a bounded cost.
+  for (let turn = 0; turn < 25; turn++) {
+    const result = await runOnce(api, bot, mint.threadId, messages);
+    if (result.calls.length === 0) break;
+    if (result.text) process.stdout.write("\n");
+    messages.push({
+      id: crypto.randomUUID(),
+      role: "assistant",
+      content: result.text,
+      toolCalls: result.calls.map((call) => ({
+        id: call.id,
+        type: "function",
+        function: { name: call.name, arguments: call.arguments || "{}" },
+      })),
+    });
+    for (const call of result.calls) {
+      let parsed: Record<string, unknown> = {};
+      try {
+        parsed = JSON.parse(call.arguments || "{}");
       } catch {}
+      process.stdout.write(
+        `\x1b[2m  → ${describeCall(call.name, parsed)}\x1b[0m`,
+      );
+      const outcome = await executeTool(api, bot, call.name, parsed);
+      const refused =
+        typeof outcome === "object" &&
+        outcome !== null &&
+        (outcome as { refused?: boolean }).refused === true;
+      process.stdout.write(refused ? "  \x1b[31mrefused\x1b[0m\n" : "\n");
+      messages.push({
+        id: crypto.randomUUID(),
+        role: "tool",
+        toolCallId: call.id,
+        content: JSON.stringify(outcome),
+      });
     }
   }
   process.stdout.write("\n");
