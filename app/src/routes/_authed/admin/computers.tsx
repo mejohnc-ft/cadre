@@ -395,14 +395,15 @@ function NodeRow({
       <ItemActions>
         {node.id === "local" ? null : (
           <>
-            <label className="flex items-center gap-2 text-muted-foreground text-xs">
+            <span className="flex items-center gap-2 text-muted-foreground text-xs">
               <Switch
+                aria-label={`${node.name} accepts new computers`}
                 checked={node.placementEnabled}
                 disabled={busy}
                 onCheckedChange={onTogglePlacement}
               />
               Accepts new computers
-            </label>
+            </span>
             <Button
               disabled={busy}
               onClick={onRemove}
