@@ -8,6 +8,20 @@ agents:
     avatar_seed: claude-code
     type: harness
     harness: claude-code
+  - id: pi
+    name: Pi
+    title: Engineering (Pi)
+    role_description: A software engineer running the Pi coding agent in its own computer, every tool decided by the deployment's boundaries first.
+    avatar_seed: pi
+    type: harness
+    harness: pi
+  - id: opencode
+    name: OpenCode
+    title: Engineering (OpenCode)
+    role_description: A software engineer running OpenCode in its own computer, every tool decided by the deployment's boundaries first.
+    avatar_seed: opencode
+    type: harness
+    harness: opencode
   - id: general-assistant
     name: General Assistant
     title: Everyday Work

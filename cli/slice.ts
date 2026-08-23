@@ -257,6 +257,9 @@ async function up() {
         ...(env.HARNESS_ANTHROPIC_BASE_URL
           ? { HARNESS_ANTHROPIC_BASE_URL: env.HARNESS_ANTHROPIC_BASE_URL }
           : {}),
+        ...(env.HARNESS_OPENAI_BASE_URL
+          ? { HARNESS_OPENAI_BASE_URL: env.HARNESS_OPENAI_BASE_URL }
+          : {}),
       },
       stdout: Bun.file(join(LOGS, "supervisor.log")),
       stderr: Bun.file(join(LOGS, "supervisor.log")),

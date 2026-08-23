@@ -626,6 +626,7 @@ const asChannelSocket = (ws: { data: SocketData }) =>
   ws as unknown as ChannelSocket;
 
 const serverOptions: Parameters<typeof serve<SocketData>>[0] = {
+  idleTimeout: 240, // SSE turns can be long — a cold VM start plus a model call exceeds 10s
   port,
   async fetch(request, server) {
     const url = new URL(request.url);

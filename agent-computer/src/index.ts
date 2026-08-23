@@ -202,6 +202,9 @@ const harness = createHarness({
   ...(process.env.OPENBOT_SERVER_URL
     ? { serverUrl: process.env.OPENBOT_SERVER_URL.replace(/\/$/, "") }
     : {}),
+  ...(process.env.HARNESS_DEFAULT
+    ? { defaultHarness: process.env.HARNESS_DEFAULT }
+    : {}),
 });
 
 /**
@@ -828,6 +831,7 @@ serve<StreamData>({
       return harness.run(botId, {
         threadId: body.threadId,
         runId: body.runId,
+        harness: request.headers.get("x-openbot-harness") ?? undefined,
         messages: Array.isArray(body.messages) ? (body.messages as never) : [],
         forwardedProps: (body.forwardedProps ?? {}) as Record<string, unknown>,
       });

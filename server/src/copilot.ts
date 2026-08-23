@@ -559,6 +559,7 @@ function remoteAgentWithStandingRole(
       headers.set("x-openbot-computer-token", harnessRuntime.computerToken);
     }
     headers.set("x-openbot-bot-id", agent.id);
+    if (agent.harness) headers.set("x-openbot-harness", agent.harness);
     return watched(`${base}/harness/run`, { ...init, headers });
   };
   const remote = new HttpAgent({

@@ -19,8 +19,15 @@ ENV PATH="/root/.bun/bin:${PATH}"
 # sandbox, and the deployment's policy — not Claude Code's prompts — decides every tool.
 RUN curl -fsSL https://claude.ai/install.sh | bash >/dev/null 2>&1 \
   && cp /root/.local/bin/claude /usr/local/bin/claude && chmod 755 /usr/local/bin/claude
+# The other managed harnesses, installed globally with bun so they are on PATH for the adapter.
+RUN bun add -g @mariozechner/pi-coding-agent opencode-ai @openai/codex >/dev/null 2>&1 \
+  && ln -sf /root/.bun/bin/pi /usr/local/bin/pi \
+  && ln -sf /root/.bun/bin/opencode /usr/local/bin/opencode \
+  && ln -sf /root/.bun/bin/codex /usr/local/bin/codex
 ENV IS_SANDBOX=1
 COPY agent-computer/hooks/slice-hook.sh /opt/slice/hook.sh
+COPY agent-computer/hooks/pi-slice.mjs /opt/slice/pi-slice.mjs
+COPY agent-computer/hooks/opencode-slice.js /opt/slice/opencode-slice.js
 RUN chmod 755 /opt/slice/hook.sh
 
 WORKDIR /app
