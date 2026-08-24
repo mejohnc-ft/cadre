@@ -20,6 +20,7 @@ const USERNAME_HINT = /user|e-?mail|login|account|phone/i;
 const PASSWORD_HINT = /pass/i;
 const CODE_HINT = /code|one.?time|otp|2fa|token|verif|authenticator/i;
 const SUBMIT_HINT = /sign.?in|log.?in|continue|submit|next|verify/i;
+const STAY_HINT = /^yes$|stay signed in|keep me signed in|remember/i;
 const FAILURE_HINT =
   /incorrect|invalid|wrong|failed|not match|try again|unable to|denied/i;
 const SUCCESS_HINT = /sign.?out|log.?out|dashboard|account|welcome|domains/i;
@@ -91,8 +92,14 @@ export function createConnectionVerifier(input: {
   ): Promise<VerifyOutcome> {
     try {
       await gateway.navigate(botId, actor, loginUrl);
-      // Two rounds: the sign-in form, then possibly a one-time-code page behind it.
-      for (let round = 0; round < 2; round++) {
+      /*
+       * Up to four rounds, because real sign-ins are staircases: Microsoft's is an email page,
+       * then a password page, then a one-time-code page, then "Stay signed in?". Each round fills
+       * whatever the current step shows and submits; a round with nothing to fill but a
+       * stay-signed-in button clicks it — that button is what makes the browser profile's cookies
+       * long-lived, which is the whole reason future runs skip the password.
+       */
+      for (let round = 0; round < 4; round++) {
         const snapshot = await gateway.snapshot(botId);
         const elements = snapshot.elements;
         const password = textbox(elements, PASSWORD_HINT);
@@ -128,6 +135,17 @@ export function createConnectionVerifier(input: {
             note: "No sign-in form was found on the page.",
           };
         } else {
+          const stay = elements.find(
+            (element) =>
+              element.role === "button" && STAY_HINT.test(element.name ?? ""),
+          );
+          if (stay) {
+            await gateway.click(botId, actor, {
+              ref: stay.ref,
+              snapshotId: snapshot.snapshotId,
+            });
+            await new Promise((resolve) => setTimeout(resolve, 2_000));
+          }
           break;
         }
 
