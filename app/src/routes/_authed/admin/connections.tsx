@@ -87,6 +87,16 @@ function ConnectionsPage() {
     verificationUri: string;
   } | null>(null);
   const [msStatus, setMsStatus] = useState("");
+  const [cred, setCred] = useState<{
+    id: string;
+    name: string;
+    loginUrl: string;
+    tag: string;
+  } | null>(null);
+  const [credUser, setCredUser] = useState("");
+  const [credPass, setCredPass] = useState("");
+  const [credTotp, setCredTotp] = useState("");
+  const [credStatus, setCredStatus] = useState("");
   const [editing, setEditing] = useState<Connection | "new" | null>(null);
   const [granting, setGranting] = useState<Connection | null>(null);
   const [grantee, setGrantee] = useState("");
@@ -98,6 +108,47 @@ function ConnectionsPage() {
   const connectBot = agentIds.includes("incident-buddy")
     ? "incident-buddy"
     : agentIds[0];
+
+  /**
+   * The chosen flow: paste the admin credentials once in a normal form (clipboard works — this is
+   * not the screencast), and Cadre signs the coworker's browser in and captures the session. From
+   * then on the coworker works visibly in the admin UI, reusing the session. The password is sealed
+   * under the master key, typed into the browser by the server, and never enters the VM or a model.
+   */
+  async function signInWithCred() {
+    if (!cred || !connectBot) return;
+    setCredStatus(
+      "Saving and signing in… (this signs the browser in and captures the session)",
+    );
+    try {
+      await save.mutateAsync({
+        id: cred.id,
+        name: cred.name,
+        kind: "web",
+        service: cred.tag,
+        loginUrl: cred.loginUrl,
+        username: credUser,
+        secret: credPass,
+        ...(credTotp ? { totpSeed: credTotp } : {}),
+      });
+      await grant.mutateAsync({ id: cred.id, agentId: connectBot });
+      const result = await verify.mutateAsync({ id: cred.id });
+      if (result.status === "ok") {
+        setCredStatus(
+          "Signed in and session captured. The coworker can now work in the admin UI.",
+        );
+        setCredPass("");
+        setCredTotp("");
+        setTimeout(() => setCred(null), 1500);
+      } else {
+        setCredStatus(`Sign-in failed: ${result.note}`);
+      }
+    } catch (error) {
+      setCredStatus(
+        `Failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
 
   /**
    * Microsoft device-code sign-in: get a code, show it, and poll until the person finishes signing
@@ -260,11 +311,13 @@ function ConnectionsPage() {
                   </ItemContent>
                   <ItemActions>
                     <Button
-                      onClick={() =>
-                        service.tag === "microsoft"
-                          ? startMs(service)
-                          : openConnect(service)
-                      }
+                      onClick={() => {
+                        setCredUser(conn?.username ?? "");
+                        setCredPass("");
+                        setCredTotp("");
+                        setCredStatus("");
+                        setCred(service);
+                      }}
                       size="sm"
                       variant={connected ? "outline" : "default"}
                     >
@@ -508,6 +561,74 @@ function ConnectionsPage() {
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open) setCred(null);
+        }}
+        open={!!cred}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Connect {cred?.name}</DialogTitle>
+            <DialogDescription>
+              Enter the admin sign-in once. Cadre signs {connectBot}'s browser
+              in and keeps the session, so the coworker works right in the admin
+              center after this. The password is encrypted, typed by the server,
+              and never enters the computer or a model.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              autoComplete="off"
+              onChange={(event) => setCredUser(event.target.value)}
+              placeholder="Admin username (e.g. you@tenant.onmicrosoft.com)"
+              value={credUser}
+            />
+            <Input
+              autoComplete="off"
+              onChange={(event) => setCredPass(event.target.value)}
+              placeholder="Password (paste — clipboard works here)"
+              type="password"
+              value={credPass}
+            />
+            <Input
+              autoComplete="off"
+              onChange={(event) => setCredTotp(event.target.value)}
+              placeholder="Authenticator setup key / TOTP seed (optional)"
+              type="password"
+              value={credTotp}
+            />
+            {credStatus ? (
+              <p className="text-muted-foreground text-sm">{credStatus}</p>
+            ) : null}
+            {cred?.tag === "microsoft" ? (
+              <button
+                className="text-muted-foreground text-xs underline"
+                onClick={() => {
+                  const service = cred;
+                  setCred(null);
+                  if (service) startMs(service);
+                }}
+                type="button"
+              >
+                Or sign in with a code on your own browser (no password stored)
+              </button>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setCred(null)} variant="ghost">
+              Cancel
+            </Button>
+            <Button
+              disabled={!credUser || !credPass || verify.isPending}
+              onClick={signInWithCred}
+            >
+              {verify.isPending ? "Signing in…" : "Sign in & capture"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
