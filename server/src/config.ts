@@ -239,9 +239,18 @@ function keychainEncryptionKey(): string | null {
 }
 
 function keyEncryptionKey(environment: Environment): string {
+  /*
+   * The placeholder is public — it ships in .env.example, and Bun auto-loads a repo .env that may
+   * still carry it. It must never outrank a real key: when the env value is the placeholder, the
+   * keychain (if it holds one) wins, so a deployment that has moved its key out of the env file
+   * does not silently fall back to the world-readable one and fail to decrypt everything sealed
+   * under the real key. An explicit, non-placeholder env value still wins, as it should.
+   */
+  const fromEnv = environment.KEY_ENCRYPTION_KEY?.trim();
   const value =
-    environment.KEY_ENCRYPTION_KEY?.trim() ||
+    (fromEnv && fromEnv !== PLACEHOLDER_KEY ? fromEnv : undefined) ||
     keychainEncryptionKey() ||
+    fromEnv ||
     required(environment, "KEY_ENCRYPTION_KEY");
   const decoded = Buffer.from(value, "base64");
 
