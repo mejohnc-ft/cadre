@@ -22,7 +22,16 @@
  *   slice audit [n]            the latest audit rows
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -145,6 +154,8 @@ async function init(args: string[]) {
     "# For OpenAI-compatible providers (Z.ai, OpenRouter, vLLM, Ollama):",
     "OPENAI_COMPATIBLE_BASE_URL=",
     "OPENAI_BASE_URL=",
+    "# Audit rows older than this are swept; unset to keep the trail forever.",
+    "AUDIT_RETENTION_DAYS=90",
     "# The managed harness (Claude Code) reaches its model through an Anthropic-compatible endpoint.",
     "# Z.ai's coding plan: https://api.z.ai/api/anthropic. Leave empty for Anthropic itself.",
     "HARNESS_ANTHROPIC_BASE_URL=",
@@ -834,6 +845,318 @@ async function keyCmd(rest: string[]) {
   console.log("Restart with: slice up");
 }
 
+/**
+ * One glance at every piece: is the stack healthy, and if not, which part.
+ *
+ * The checks are the ones a 2am page would want: processes answering, the database reachable
+ * through the server, the master key readable, the VMs running, the disk not full. Exit code 0
+ * only when everything is green, so a script can watch it.
+ */
+async function doctorCmd(): Promise<void> {
+  let bad = 0;
+  const report = (ok: boolean, name: string, note: string) => {
+    if (!ok) bad += 1;
+    console.log(`${ok ? "  ok " : " FAIL"}  ${name.padEnd(22)} ${note}`);
+  };
+
+  const server = await answering(`http://127.0.0.1:${SERVER_PORT}/health`);
+  report(
+    server,
+    "server",
+    server ? `answering on :${SERVER_PORT}` : "not answering — run: slice up",
+  );
+  const supervisor = await answering(
+    `http://127.0.0.1:${SUPERVISOR_PORT}/health`,
+  );
+  report(
+    supervisor,
+    "supervisor",
+    supervisor ? `answering on :${SUPERVISOR_PORT}` : "not answering",
+  );
+
+  if (server) {
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${SERVER_PORT}/api/capabilities`,
+        {
+          signal: AbortSignal.timeout(4_000),
+        },
+      );
+      const body = (await response.json()) as { mode?: string };
+      report(body.mode === "postgres", "database", `mode: ${body.mode}`);
+    } catch {
+      report(false, "database", "capabilities did not answer");
+    }
+  } else {
+    report(false, "database", "unknown while the server is down");
+  }
+
+  if (process.platform === "darwin") {
+    const env = existsSync(ENV_FILE) ? loadEnv() : {};
+    if (env.KEY_ENCRYPTION_KEY) {
+      report(
+        true,
+        "master key",
+        "in the env file (consider: slice key keychain)",
+      );
+    } else {
+      const probe = Bun.spawnSync([
+        "security",
+        "find-generic-password",
+        "-s",
+        "cadre-key-encryption",
+        "-w",
+      ]);
+      report(
+        probe.exitCode === 0,
+        "master key",
+        probe.exitCode === 0
+          ? "in the macOS keychain"
+          : "MISSING — the vault cannot decrypt",
+      );
+    }
+    const vms = Bun.spawnSync(["container", "list"]);
+    const running = vms.stdout
+      .toString()
+      .split("\n")
+      .filter((line) => line.includes("running")).length;
+    report(
+      vms.exitCode === 0,
+      "computers",
+      `${Math.max(0, running)} container(s) running`,
+    );
+  }
+
+  const disk = Bun.spawnSync(["df", "-h", HOME]);
+  const line = disk.stdout.toString().split("\n")[1] ?? "";
+  const used = Number((/([0-9]+)%/.exec(line) ?? [])[1] ?? 0);
+  report(used < 90, "disk", `${used}% used on ${HOME}`);
+
+  const backups = join(HOME, "backups");
+  if (existsSync(backups)) {
+    const newest = readdirSync(backups).sort().at(-1);
+    const age = newest
+      ? (Date.now() - statSync(join(backups, newest)).mtimeMs) / 3_600_000
+      : Infinity;
+    report(
+      age < 36,
+      "backups",
+      newest
+        ? `newest ${newest} (${age.toFixed(0)}h old)`
+        : "directory is empty",
+    );
+  } else {
+    report(false, "backups", "none yet — run: slice backup");
+  }
+
+  if (bad > 0) {
+    console.log(`\n${bad} check(s) failing.`);
+    process.exit(1);
+  }
+  console.log("\nAll green.");
+}
+
+/**
+ * A dump of everything that cannot be rebuilt: the database, and the env file's tokens.
+ *
+ * The vault's ciphertext travels in the dump and is useless without the master key, which lives in
+ * the keychain and deliberately not in the backup. Workspaces and browser profiles are not here —
+ * they are caches a coworker rebuilds — and neither is the repo, which is on GitHub.
+ */
+async function backupCmd(): Promise<string> {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const dir = join(HOME, "backups");
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, `cadre-${stamp}.sql.gz`);
+  const dump = Bun.spawnSync(
+    ["container", "exec", POSTGRES_VM, "pg_dump", "-U", "slice", "-d", "slice"],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  if (dump.exitCode !== 0 || dump.stdout.length === 0) {
+    fail(`pg_dump failed: ${dump.stderr.toString().trim().slice(0, 200)}`);
+  }
+  writeFileSync(file, Bun.gzipSync(new Uint8Array(dump.stdout)), {
+    mode: 0o600,
+  });
+  if (existsSync(ENV_FILE)) {
+    writeFileSync(join(dir, `slice.env.${stamp}`), readFileSync(ENV_FILE), {
+      mode: 0o600,
+    });
+  }
+  // Retention: the newest 14 of each kind stay.
+  for (const prefix of ["cadre-", "slice.env."]) {
+    const old = readdirSync(dir)
+      .filter((name) => name.startsWith(prefix))
+      .sort()
+      .slice(0, -14);
+    for (const name of old) rmSync(join(dir, name));
+  }
+  console.log(
+    `Backed up to ${file} (${(statSync(file).size / 1024).toFixed(0)} KiB).`,
+  );
+  console.log(
+    "Restore with: slice restore <file>. The vault needs the keychain key to decrypt.",
+  );
+  return file;
+}
+
+async function restoreCmd(rest: string[]) {
+  const file = rest[0];
+  if (!file || !existsSync(file)) {
+    fail(
+      "Usage: slice restore <backup.sql.gz>   (stop the server first: pkill -f src/index.ts)",
+    );
+  }
+  if (await answering(`http://127.0.0.1:${SERVER_PORT}/health`)) {
+    fail(
+      "The server is running. Stop it first so the restore is not written to underneath.",
+    );
+  }
+  const sql = Bun.gunzipSync(new Uint8Array(readFileSync(file)));
+  // Two calls, not one: psql runs a multi-statement -c inside one implicit transaction, and
+  // DROP DATABASE refuses to run in a transaction block.
+  for (const statement of [
+    "DROP DATABASE IF EXISTS slice;",
+    "CREATE DATABASE slice OWNER slice;",
+  ]) {
+    const step = Bun.spawnSync([
+      "container",
+      "exec",
+      POSTGRES_VM,
+      "psql",
+      "-U",
+      "slice",
+      "-d",
+      "postgres",
+      "-c",
+      statement,
+    ]);
+    if (step.exitCode !== 0)
+      fail(`Could not recreate the database: ${step.stderr.toString().trim()}`);
+  }
+  const psql = Bun.spawnSync(
+    [
+      "container",
+      "exec",
+      "-i",
+      POSTGRES_VM,
+      "psql",
+      "-U",
+      "slice",
+      "-d",
+      "slice",
+    ],
+    { stdin: sql, stdout: "pipe", stderr: "pipe" },
+  );
+  if (psql.exitCode !== 0)
+    fail(`Restore failed: ${psql.stderr.toString().trim().slice(0, 300)}`);
+  console.log(`Restored ${file}. Start with: slice up`);
+}
+
+/**
+ * The keeper: a foreground loop launchd owns, so the stack outlives reboots and crashes.
+ *
+ * Every minute: if the server or supervisor is not answering, run the same startup `slice up`
+ * performs. Once a day: back up, and rotate a grown log. This process does almost nothing while
+ * everything is healthy, which is what a keeper should do.
+ */
+async function guardCmd(): Promise<void> {
+  console.log("cadre guard: watching the stack.");
+  let lastDaily = 0;
+  for (;;) {
+    try {
+      const serverUp = await answering(
+        `http://127.0.0.1:${SERVER_PORT}/health`,
+      );
+      const supervisorUp = await answering(
+        `http://127.0.0.1:${SUPERVISOR_PORT}/health`,
+      );
+      if (!serverUp || !supervisorUp) {
+        console.log(
+          `${new Date().toISOString()} guard: server=${serverUp} supervisor=${supervisorUp} — running slice up`,
+        );
+        const boot = Bun.spawn(
+          [process.execPath, join(REPO, "cli/slice.ts"), "up"],
+          {
+            stdout: "inherit",
+            stderr: "inherit",
+          },
+        );
+        await boot.exited;
+      }
+      if (Date.now() - lastDaily > 24 * 3_600_000) {
+        lastDaily = Date.now();
+        try {
+          await backupCmd();
+        } catch (error) {
+          console.log(
+            `guard: backup failed: ${error instanceof Error ? error.message : error}`,
+          );
+        }
+        const log = join(HOME, "logs", "server.log");
+        if (existsSync(log) && statSync(log).size > 5 * 1024 * 1024) {
+          renameSync(log, `${log}.1`);
+        }
+      }
+    } catch (error) {
+      console.log(`guard: ${error instanceof Error ? error.message : error}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 60_000));
+  }
+}
+
+/**
+ * Install the keeper as a LaunchAgent, so login brings the whole stack up.
+ *
+ * launchd keeps the guard alive; the guard keeps everything else alive. PATH is written into the
+ * plist because launchd's default one has neither homebrew (the container CLI) nor bun.
+ */
+async function autostartCmd(rest: string[]) {
+  if (process.platform !== "darwin") {
+    fail(
+      "Autostart here is a macOS LaunchAgent. On Linux, use the systemd units the installer writes.",
+    );
+  }
+  const agents = join(process.env.HOME ?? "", "Library", "LaunchAgents");
+  const plist = join(agents, "com.cadre.guard.plist");
+  if (rest[0] === "off") {
+    Bun.spawnSync(["launchctl", "unload", plist]);
+    if (existsSync(plist)) rmSync(plist);
+    console.log("Autostart removed.");
+    return;
+  }
+  mkdirSync(agents, { recursive: true });
+  const content = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.cadre.guard</string>
+  <key>ProgramArguments</key><array>
+    <string>${process.execPath}</string>
+    <string>${join(REPO, "cli/slice.ts")}</string>
+    <string>guard</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>${join(HOME, "logs", "guard.log")}</string>
+  <key>StandardErrorPath</key><string>${join(HOME, "logs", "guard.log")}</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+</dict></plist>
+`;
+  writeFileSync(plist, content);
+  Bun.spawnSync(["launchctl", "unload", plist]);
+  const load = Bun.spawnSync(["launchctl", "load", plist]);
+  if (load.exitCode !== 0)
+    fail(`launchctl load failed: ${load.stderr.toString().trim()}`);
+  console.log(
+    `Installed ${plist}. The guard now starts at login, restarts on crash, backs up daily.`,
+  );
+  console.log(
+    "Watch it: tail -f ~/.slice/logs/guard.log · Remove: slice autostart off",
+  );
+}
+
 // -------------------------------------------------------------------- main --
 
 const [command, ...rest] = process.argv.slice(2);
@@ -879,6 +1202,21 @@ switch (command) {
   case "key":
     await keyCmd(rest);
     break;
+  case "doctor":
+    await doctorCmd();
+    break;
+  case "backup":
+    await backupCmd();
+    break;
+  case "restore":
+    await restoreCmd(rest);
+    break;
+  case "guard":
+    await guardCmd();
+    break;
+  case "autostart":
+    await autostartCmd(rest);
+    break;
   default:
     console.log(`cadre — a personal agent control plane, on this Mac
 
@@ -886,6 +1224,10 @@ switch (command) {
   slice up                                start everything (VMs for postgres and computers)
   slice down                              stop everything; volumes survive
   slice key keychain                      hold the master key in the macOS keychain, not a file
+  slice doctor                            check every piece; exit 0 only when all green
+  slice backup                            dump the database and tokens to ~/.slice/backups
+  slice restore <file>                    load a backup (stop the server first)
+  slice autostart [off]                   start at login, restart on crash, back up daily
   slice status                            what is running, and the slice's use
   slice agents                            list coworkers
   slice chat [--thread id] <bot> "..."    one governed turn; --thread continues a conversation
