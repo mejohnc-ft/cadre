@@ -124,6 +124,23 @@ const TOOLS: Array<ToolDefinition & { route: Route }> = [
     route: { method: "POST", path: "/type_secret" },
   },
   {
+    name: "computer_use_session",
+    description:
+      "Sign in using a stored session instead of a password. Name a connection this coworker has " +
+      "been granted whose sign-in was already captured; the server loads that session into your " +
+      "browser so you start already logged in, and optionally opens a URL. Prefer this over " +
+      "computer_type_secret when the connection has a captured session — it needs no password and " +
+      "no MFA. If it reports no captured session, fall back to signing in with computer_type_secret.",
+    parameters: schema(
+      {
+        connection: string('The connection id, like "m365-admin"'),
+        openUrl: string("A URL to open once signed in (optional)"),
+      },
+      ["connection"],
+    ),
+    route: { method: "POST", path: "/use_session" },
+  },
+  {
     name: "computer_key",
     description:
       "Press a key, such as Enter, Tab or Escape. Give a ref to press it while a particular field " +
@@ -233,6 +250,8 @@ export function describeCall(name: string, args: Record<string, unknown>) {
       return `type into ${args.ref}`;
     case "computer_type_secret":
       return `type the ${args.field} of ${args.connection} into ${args.ref}`;
+    case "computer_use_session":
+      return `sign in with the ${args.connection} session${args.openUrl ? ` and open ${args.openUrl}` : ""}`;
     case "computer_key":
       return `press ${args.key}`;
     case "computer_scroll":

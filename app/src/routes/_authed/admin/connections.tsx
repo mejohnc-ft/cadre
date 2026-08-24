@@ -98,6 +98,9 @@ function ConnectionsPage() {
                       {connection.hasTotp ? (
                         <Badge variant="secondary">totp</Badge>
                       ) : null}
+                      {connection.hasSession ? (
+                        <Badge variant="secondary">session ready</Badge>
+                      ) : null}
                       {connection.lastVerifyStatus ? (
                         <Badge
                           variant={

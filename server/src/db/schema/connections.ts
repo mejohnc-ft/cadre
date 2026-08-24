@@ -40,6 +40,15 @@ export const connections = pgTable("connections", {
   /** TOTP seed for logins with one-time codes; the server computes the six digits. */
   totpEncrypted: text("totp_encrypted"),
   /**
+   * A captured browser session (Playwright storageState) sealed like every other secret. This is
+   * the "auth once, reuse" path: a supervised login produces it, and a run imports it so the
+   * coworker starts signed in. Held on the connection so grants and audit already cover it.
+   */
+  sessionEncrypted: text("session_encrypted"),
+  sessionCapturedAt: timestamp("session_captured_at", { withTimezone: true }),
+  /** A human hint at when the session likely stops working (earliest cookie expiry). */
+  sessionExpiresHint: text("session_expires_hint"),
+  /**
    * For api connections: which requests egress will forward, as "METHOD /path" rules with `*` and
    * `**` wildcards. Null or empty forwards the whole API — the token's own scopes then rule.
    */

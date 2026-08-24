@@ -200,6 +200,18 @@ export function createComputerRoutes(
     }),
   );
 
+  routes.post("/:botId/use_session", (context) =>
+    act(context, (botId, actor, body) => {
+      if (typeof body?.connection !== "string") {
+        return { error: "use_session needs a connection id." };
+      }
+      return gateway.useSession(botId, actor, {
+        connection: body.connection,
+        ...(typeof body.openUrl === "string" ? { openUrl: body.openUrl } : {}),
+      });
+    }),
+  );
+
   routes.post("/:botId/key", (context) =>
     act(context, (botId, actor, body, signal) => {
       if (typeof body?.key !== "string" || !body.key) {

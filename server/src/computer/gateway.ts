@@ -123,6 +123,7 @@ export type ComputerGatewayOptions = {
     get(connectionId: string): Promise<{ username: string | null } | null>;
     secretOf(connectionId: string): Promise<string | null>;
     totpSeedOf(connectionId: string): Promise<string | null>;
+    sessionOf(connectionId: string): Promise<string | null>;
   };
 };
 
@@ -155,6 +156,21 @@ export interface ComputerGateway {
     actor: ActionActor,
     input: TypeSecretInput,
   ): Promise<SecretResult>;
+  /** Export the computer's logged-in browser session (storageState). Admin/verify path only. */
+  exportSession(
+    botId: string,
+  ): Promise<{ state: unknown; cookieCount: number; originCount: number }>;
+  /** Import a captured session into the computer's browser, optionally opening a URL. */
+  importSession(
+    botId: string,
+    state: unknown,
+    openUrl?: string,
+  ): Promise<{ imported: boolean; cookieCount: number; url: string }>;
+  useSession(
+    botId: string,
+    actor: ActionActor,
+    input: { connection: string; openUrl?: string },
+  ): Promise<{ used: boolean; cookieCount: number; url: string }>;
   key(
     botId: string,
     actor: ActionActor,
@@ -859,6 +875,75 @@ export function createComputerGateway(
       );
     },
 
+    /**
+     * Sign a coworker in with a captured session instead of a password. Grant-checked at use, and
+     * audited — the coworker names a connection it has been granted, the gateway loads that
+     * connection's stored browser session into this computer, and the coworker is signed in with
+     * no password ever crossing its context.
+     */
+    useSession(
+      botId: string,
+      actor: ActionActor,
+      input: { connection: string; openUrl?: string },
+    ) {
+      return govern("computer_use_session", botId, actor, {}, async () => {
+        const vault = options.connections;
+        if (!vault) {
+          throw new ActionRefusedError(
+            "This deployment has no connections vault.",
+            null,
+          );
+        }
+        if (!(await vault.allowed(input.connection, botId))) {
+          throw new ActionRefusedError(
+            `This coworker has no grant for the connection "${input.connection}".`,
+            null,
+          );
+        }
+        const stateJson = await vault.sessionOf(input.connection);
+        if (!stateJson) {
+          throw new ActionRefusedError(
+            `The connection "${input.connection}" has no captured session. An administrator can capture one with Verify sign-in.`,
+            null,
+          );
+        }
+        const result = await post<{
+          imported: boolean;
+          cookieCount: number;
+          url: string;
+        }>(botId, "/session/import", {
+          state: JSON.parse(stateJson),
+          ...(input.openUrl ? { openUrl: input.openUrl } : {}),
+        });
+        await writeControlEvent(auditStore, "connection.session_loaded", {
+          botId,
+          actor,
+          reason: `${input.connection}, ${result.cookieCount} cookies${input.openUrl ? ` → ${input.openUrl}` : ""}`,
+        });
+        return {
+          used: result.imported,
+          cookieCount: result.cookieCount,
+          url: result.url,
+        };
+      });
+    },
+
+    exportSession(botId: string) {
+      return post<{ state: unknown; cookieCount: number; originCount: number }>(
+        botId,
+        "/session/export",
+        {},
+      );
+    },
+
+    importSession(botId: string, state: unknown, openUrl?: string) {
+      return post<{ imported: boolean; cookieCount: number; url: string }>(
+        botId,
+        "/session/import",
+        { state, ...(openUrl ? { openUrl } : {}) },
+      );
+    },
+
     key(
       botId: string,
       actor: ActionActor,
@@ -1027,6 +1112,9 @@ function intentOf(
     // A secret goes into a field and nothing is pressed afterwards; it is a typing action to a rule.
     case "computer_type_secret":
       return "type";
+    // Loading a session signs the coworker in and opens a page — a navigation, to a rule.
+    case "computer_use_session":
+      return "navigate";
     case "computer_navigate":
       return "navigate";
     case "computer_read":
@@ -1156,7 +1244,8 @@ async function writeControlEvent(
     | "computer.secret_supplied"
     | "computer.stopped"
     | "computer.reset"
-    | "connection.secret_typed",
+    | "connection.secret_typed"
+    | "connection.session_loaded",
   entry: {
     botId: string;
     actor: ActionActor;

@@ -957,6 +957,90 @@ serve<StreamData>({
       }
     }
 
+    /*
+     * Export the browser's logged-in session — Playwright storageState (cookies + per-origin
+     * localStorage). This is the "token" a supervised login produces: the API encrypts it onto a
+     * connection, and a later run imports it into a fresh computer so the coworker starts already
+     * signed in. The value is a live credential; the API alone decides who may ask for it.
+     */
+    if (url.pathname === "/session/export" && request.method === "POST") {
+      try {
+        const target = await currentPage(botId);
+        const state = await target.context().storageState();
+        return json({
+          state,
+          cookieCount: state.cookies.length,
+          originCount: state.origins.length,
+        });
+      } catch (error) {
+        return json({ error: describe(error, "Session export failed.") }, 502);
+      }
+    }
+
+    /*
+     * Import a captured session into this computer's browser: add its cookies to the live context,
+     * replay each origin's localStorage, then open a target URL so the caller can confirm the
+     * session took. Cookies carry most sign-ins; localStorage covers the SPAs that keep a token
+     * there. The computer is now signed in without a password ever being typed here.
+     */
+    if (url.pathname === "/session/import" && request.method === "POST") {
+      try {
+        const body = (await request.json().catch(() => null)) as {
+          state?: {
+            cookies?: unknown[];
+            origins?: Array<{
+              origin: string;
+              localStorage: Array<{ name: string; value: string }>;
+            }>;
+          };
+          openUrl?: string;
+        } | null;
+        const state = body?.state;
+        if (!state || !Array.isArray(state.cookies)) {
+          return json(
+            { error: "A storageState with cookies is required." },
+            400,
+          );
+        }
+        const target = await currentPage(botId);
+        const context = target.context();
+        await context.addCookies(
+          state.cookies as Parameters<typeof context.addCookies>[0],
+        );
+        for (const origin of state.origins ?? []) {
+          if (!origin.localStorage?.length) continue;
+          try {
+            await target.goto(origin.origin, {
+              waitUntil: "domcontentloaded",
+              timeout: 20_000,
+            });
+            await target.evaluate((items) => {
+              for (const item of items) {
+                try {
+                  window.localStorage.setItem(item.name, item.value);
+                } catch {}
+              }
+            }, origin.localStorage);
+          } catch {
+            // A single unreachable origin should not fail the whole import; cookies already landed.
+          }
+        }
+        if (typeof body?.openUrl === "string" && body.openUrl) {
+          await target.goto(body.openUrl, {
+            waitUntil: "domcontentloaded",
+            timeout: 30_000,
+          });
+        }
+        return json({
+          imported: true,
+          cookieCount: state.cookies.length,
+          url: target.url(),
+        });
+      } catch (error) {
+        return json({ error: describe(error, "Session import failed.") }, 502);
+      }
+    }
+
     // The list of things on the page a Bot can act on. POST rather than GET because it mutates the
     // page, stamping every element it describes, and a GET that changes the document is a lie that
     // caches and prefetchers eventually punish.

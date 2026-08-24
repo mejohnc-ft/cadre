@@ -81,6 +81,26 @@ export function createConnectionVerifier(input: {
 
     const outcome = await walk(connection.loginUrl, connection, botId, actor);
     await store.recordVerify(connectionId, outcome);
+
+    // A successful sign-in leaves the browser logged in — capture that session now, so future runs
+    // reuse the token and never re-enter the password. Best-effort: a capture failure does not
+    // undo a verified sign-in.
+    if (outcome.status === "ok") {
+      try {
+        const exported = await gateway.exportSession(botId);
+        const state = exported.state as {
+          cookies?: Array<{ expires?: number }>;
+        };
+        const expiresHint = earliestExpiry(state?.cookies ?? []);
+        await store.storeSession(
+          connectionId,
+          JSON.stringify(exported.state),
+          expiresHint,
+        );
+      } catch {
+        // The sign-in still counts; the session simply was not captured this round.
+      }
+    }
     return outcome;
   }
 
@@ -198,6 +218,18 @@ export function createConnectionVerifier(input: {
   }
 
   return { verify };
+}
+
+/**
+ * A human hint at when the captured session likely stops working: the earliest real cookie expiry.
+ * Session cookies (no expiry) are skipped; they die with the browser, not on a clock.
+ */
+function earliestExpiry(cookies: Array<{ expires?: number }>): string | null {
+  const times = cookies
+    .map((cookie) => cookie.expires)
+    .filter((value): value is number => typeof value === "number" && value > 0);
+  if (times.length === 0) return null;
+  return new Date(Math.min(...times) * 1000).toISOString();
 }
 
 function firstMatch(text: string, pattern: RegExp): string {

@@ -33,6 +33,9 @@ export type Connection = {
   lastVerifiedAt: string | null;
   lastVerifyStatus: string | null;
   lastVerifyNote: string | null;
+  hasSession: boolean;
+  sessionCapturedAt: string | null;
+  sessionExpiresHint: string | null;
   updatedAt: string;
 };
 
@@ -54,6 +57,9 @@ function toConnection(
     lastVerifiedAt: row.lastVerifiedAt?.toISOString() ?? null,
     lastVerifyStatus: row.lastVerifyStatus,
     lastVerifyNote: row.lastVerifyNote,
+    hasSession: row.sessionEncrypted !== null,
+    sessionCapturedAt: row.sessionCapturedAt?.toISOString() ?? null,
+    sessionExpiresHint: row.sessionExpiresHint,
     grants,
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -288,6 +294,54 @@ export function createConnectionStore(
         .where(eq(connections.id, id))
         .limit(1);
       return row ? decryptSecret(encryptionKey, row.secretEncrypted) : null;
+    },
+
+    /** Seal a captured browser session onto the connection. The plaintext is never returned. */
+    async storeSession(
+      id: string,
+      stateJson: string,
+      expiresHint: string | null,
+    ): Promise<void> {
+      const encrypted = await encryptSecret(encryptionKey, stateJson);
+      await database
+        .update(connections)
+        .set({
+          sessionEncrypted: encrypted,
+          sessionCapturedAt: new Date(),
+          sessionExpiresHint: expiresHint,
+          updatedAt: new Date(),
+        })
+        .where(eq(connections.id, id));
+      await recordAuditEvent(audit, {
+        eventType: "connection.session_captured",
+        targetType: "connection",
+        targetId: id,
+        payload: { connection: id, expiresHint },
+      });
+    },
+
+    /** The decrypted session (storageState JSON), for injecting into a computer alone. */
+    async sessionOf(id: string): Promise<string | null> {
+      const [row] = await database
+        .select({ sessionEncrypted: connections.sessionEncrypted })
+        .from(connections)
+        .where(eq(connections.id, id))
+        .limit(1);
+      return row?.sessionEncrypted
+        ? decryptSecret(encryptionKey, row.sessionEncrypted)
+        : null;
+    },
+
+    /** Forget a captured session (e.g. it expired). */
+    async clearSession(id: string): Promise<void> {
+      await database
+        .update(connections)
+        .set({
+          sessionEncrypted: null,
+          sessionCapturedAt: null,
+          sessionExpiresHint: null,
+        })
+        .where(eq(connections.id, id));
     },
 
     /** The decrypted TOTP seed, or null when the login has none. */

@@ -16,6 +16,9 @@ export type Connection = {
   lastVerifiedAt: string | null;
   lastVerifyStatus: string | null;
   lastVerifyNote: string | null;
+  hasSession: boolean;
+  sessionCapturedAt: string | null;
+  sessionExpiresHint: string | null;
   updatedAt: string;
 };
 
