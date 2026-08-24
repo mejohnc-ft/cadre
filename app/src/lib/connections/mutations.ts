@@ -96,3 +96,50 @@ export function verifyConnectionMutationOptions(queryClient: QueryClient) {
     onSettled: () => invalidate(queryClient),
   });
 }
+
+export function connectBeginMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (input: {
+      id: string;
+      agentId?: string;
+    }): Promise<{ ok: boolean; note: string; botId?: string }> => {
+      const response = await client(
+        `/api/admin/connections/${encodeURIComponent(input.id)}/connect-begin`,
+        {
+          method: "POST",
+          body: input.agentId ? { agentId: input.agentId } : {},
+          fallback: "Could not begin the sign-in.",
+        },
+      );
+      return (await response.json()) as {
+        ok: boolean;
+        note: string;
+        botId?: string;
+      };
+    },
+  });
+}
+
+export function connectCaptureMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (input: {
+      id: string;
+      agentId?: string;
+    }): Promise<{ ok: boolean; note: string; cookieCount?: number }> => {
+      const response = await client(
+        `/api/admin/connections/${encodeURIComponent(input.id)}/connect-capture`,
+        {
+          method: "POST",
+          body: input.agentId ? { agentId: input.agentId } : {},
+          fallback: "Could not capture the session.",
+        },
+      );
+      return (await response.json()) as {
+        ok: boolean;
+        note: string;
+        cookieCount?: number;
+      };
+    },
+    onSettled: () => invalidate(queryClient),
+  });
+}

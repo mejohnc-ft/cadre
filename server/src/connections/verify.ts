@@ -217,7 +217,85 @@ export function createConnectionVerifier(input: {
     }
   }
 
-  return { verify };
+  /**
+   * Supervised connect — begin: open the connection's sign-in page in a granted coworker's browser
+   * and hand control to the person. They sign in themselves on the real vendor page (password, MFA,
+   * everything), watching the live screen; nothing is typed into Cadre. Penny's connect flow, on
+   * Cadre's takeover.
+   */
+  async function connectBegin(
+    connectionId: string,
+    botId: string,
+    actor: ActionActor,
+  ): Promise<{ ok: boolean; note: string }> {
+    const connection = await store.get(connectionId);
+    if (!connection) return { ok: false, note: "No such connection." };
+    if (!connection.loginUrl) {
+      return { ok: false, note: "The connection has no sign-in page." };
+    }
+    if (!connection.grants.includes(botId)) {
+      return { ok: false, note: `${botId} has no grant for ${connectionId}.` };
+    }
+    try {
+      await gateway.navigate(botId, actor, connection.loginUrl);
+      await gateway.takeControl(botId, actor);
+      return {
+        ok: true,
+        note: `Opened ${connection.loginUrl} in ${botId}. Sign in on the live screen, then capture.`,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        note: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  /**
+   * Supervised connect — capture: the person has signed in on the live screen; export the resulting
+   * session, seal it on the connection, and release control. No password was ever stored.
+   */
+  async function connectCapture(
+    connectionId: string,
+    botId: string,
+    actor: ActionActor,
+  ): Promise<{ ok: boolean; note: string; cookieCount?: number }> {
+    const connection = await store.get(connectionId);
+    if (!connection) return { ok: false, note: "No such connection." };
+    if (!connection.grants.includes(botId)) {
+      return { ok: false, note: `${botId} has no grant for ${connectionId}.` };
+    }
+    try {
+      const exported = await gateway.exportSession(botId);
+      if (!exported.cookieCount) {
+        return {
+          ok: false,
+          note: "No session cookies were found — the sign-in may not have completed.",
+        };
+      }
+      const state = exported.state as {
+        cookies?: Array<{ expires?: number }>;
+      };
+      await store.storeSession(
+        connectionId,
+        JSON.stringify(exported.state),
+        earliestExpiry(state?.cookies ?? []),
+      );
+      await gateway.releaseControl(botId, actor).catch(() => undefined);
+      return {
+        ok: true,
+        note: `Captured a ${exported.cookieCount}-cookie session.`,
+        cookieCount: exported.cookieCount,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        note: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  return { verify, connectBegin, connectCapture };
 }
 
 /**

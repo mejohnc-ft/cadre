@@ -171,6 +171,61 @@ export function createConnectionRoutes(input: {
     return context.json(outcome);
   });
 
+  /** Supervised connect: open the sign-in page + take control, so a person signs in themselves. */
+  app.post("/admin/connections/:id/connect-begin", admin, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) return denied;
+    if (!input.verifier) {
+      return context.json({ error: "This deployment has no computer." }, 503);
+    }
+    const connection = await input.store.get(context.req.param("id"));
+    if (!connection) return context.json({ error: "No such connection." }, 404);
+    const body = (await context.req.json().catch(() => null)) as {
+      agentId?: unknown;
+    } | null;
+    const botId =
+      typeof body?.agentId === "string" && body.agentId
+        ? body.agentId
+        : connection.grants[0];
+    if (!botId) {
+      return context.json(
+        {
+          error:
+            "Grant the connection to a coworker first; the sign-in runs in its computer.",
+        },
+        400,
+      );
+    }
+    const outcome = await input.verifier.connectBegin(connection.id, botId, {
+      id: context.var.actor.id,
+    });
+    return context.json({ ...outcome, botId });
+  });
+
+  /** Supervised connect: capture the session the person just signed into. */
+  app.post("/admin/connections/:id/connect-capture", admin, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) return denied;
+    if (!input.verifier) {
+      return context.json({ error: "This deployment has no computer." }, 503);
+    }
+    const connection = await input.store.get(context.req.param("id"));
+    if (!connection) return context.json({ error: "No such connection." }, 404);
+    const body = (await context.req.json().catch(() => null)) as {
+      agentId?: unknown;
+    } | null;
+    const botId =
+      typeof body?.agentId === "string" && body.agentId
+        ? body.agentId
+        : connection.grants[0];
+    if (!botId)
+      return context.json({ error: "No coworker to capture from." }, 400);
+    const outcome = await input.verifier.connectCapture(connection.id, botId, {
+      id: context.var.actor.id,
+    });
+    return context.json(outcome);
+  });
+
   app.post("/admin/connections/:id/grants", admin, async (context) => {
     const denied = requireAdmin(context);
     if (denied) return denied;

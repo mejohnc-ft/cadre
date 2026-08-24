@@ -127,7 +127,7 @@ export function createConnectionStore(
         .from(connections)
         .where(eq(connections.id, input.id))
         .limit(1);
-      if (!existing && !input.secret) {
+      if (!existing && !input.secret && input.kind !== "web") {
         throw new Error("A new connection needs a secret.");
       }
       /*
@@ -176,7 +176,7 @@ export function createConnectionStore(
         await database.insert(connections).values({
           id: input.id,
           ...values,
-          secretEncrypted: encrypted as string,
+          secretEncrypted: encrypted ?? null,
         });
       }
       await recordAuditEvent(audit, {
@@ -293,7 +293,9 @@ export function createConnectionStore(
         .from(connections)
         .where(eq(connections.id, id))
         .limit(1);
-      return row ? decryptSecret(encryptionKey, row.secretEncrypted) : null;
+      return row?.secretEncrypted
+        ? decryptSecret(encryptionKey, row.secretEncrypted)
+        : null;
     },
 
     /** Seal a captured browser session onto the connection. The plaintext is never returned. */

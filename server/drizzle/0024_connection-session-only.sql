@@ -1,0 +1,1 @@
+ALTER TABLE "connections" ALTER COLUMN "secret_encrypted" DROP NOT NULL;

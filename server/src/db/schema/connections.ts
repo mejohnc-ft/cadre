@@ -36,7 +36,8 @@ export const connections = pgTable("connections", {
   loginUrl: text("login_url"),
   /** For web logins: the account name, which is not a secret and may be typed openly. */
   username: text("username"),
-  secretEncrypted: text("secret_encrypted").notNull(),
+  /** Null for a session-only web login: connected by signing in yourself, no password stored. */
+  secretEncrypted: text("secret_encrypted"),
   /** TOTP seed for logins with one-time codes; the server computes the six digits. */
   totpEncrypted: text("totp_encrypted"),
   /**

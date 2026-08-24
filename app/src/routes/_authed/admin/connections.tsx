@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
+import { ComputerView } from "@/components/computer/computer-view";
 import {
   PageEmpty,
   PageRows,
@@ -37,6 +38,8 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
+  connectBeginMutationOptions,
+  connectCaptureMutationOptions,
   grantConnectionMutationOptions,
   removeConnectionMutationOptions,
   revokeConnectionMutationOptions,
@@ -61,7 +64,16 @@ function ConnectionsPage() {
   const grant = useMutation(grantConnectionMutationOptions(queryClient));
   const revoke = useMutation(revokeConnectionMutationOptions(queryClient));
   const verify = useMutation(verifyConnectionMutationOptions(queryClient));
+  const connectBegin = useMutation(connectBeginMutationOptions(queryClient));
+  const connectCapture = useMutation(
+    connectCaptureMutationOptions(queryClient),
+  );
   const [verifying, setVerifying] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState<{
+    connection: Connection;
+    botId: string;
+  } | null>(null);
+  const [connectNote, setConnectNote] = useState("");
   const [editing, setEditing] = useState<Connection | "new" | null>(null);
   const [granting, setGranting] = useState<Connection | null>(null);
   const [grantee, setGrantee] = useState("");
@@ -145,6 +157,40 @@ function ConnectionsPage() {
                   <ItemActions>
                     {connection.kind === "web" ? (
                       <Button
+                        disabled={
+                          connectBegin.isPending ||
+                          connection.grants.length === 0
+                        }
+                        onClick={() => {
+                          setConnectNote("Opening the sign-in page…");
+                          connectBegin.mutate(
+                            { id: connection.id },
+                            {
+                              onSuccess: (result) => {
+                                if (result.botId) {
+                                  setConnecting({
+                                    connection,
+                                    botId: result.botId,
+                                  });
+                                }
+                                setConnectNote(result.note);
+                              },
+                            },
+                          );
+                        }}
+                        size="sm"
+                        title={
+                          connection.grants.length === 0
+                            ? "Grant this connection to a coworker first"
+                            : "Sign in yourself on the live screen; the session is captured"
+                        }
+                        variant="outline"
+                      >
+                        Sign in yourself
+                      </Button>
+                    ) : null}
+                    {connection.kind === "web" ? (
+                      <Button
                         disabled={verify.isPending}
                         onClick={() => {
                           setVerifying(connection.id);
@@ -154,11 +200,11 @@ function ConnectionsPage() {
                           );
                         }}
                         size="sm"
-                        variant="outline"
+                        variant="ghost"
                       >
                         {verifying === connection.id
                           ? "Signing in…"
-                          : "Verify sign-in"}
+                          : "Verify (auto)"}
                       </Button>
                     ) : null}
                     <Button
@@ -289,6 +335,60 @@ function ConnectionsPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open) setConnecting(null);
+        }}
+        open={!!connecting}
+      >
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Sign in to {connecting?.connection.name}</DialogTitle>
+            <DialogDescription>
+              This is the real vendor page, open in {connecting?.botId}'s
+              browser. Click "Take control" below, sign in yourself — password,
+              MFA, everything — then click "I'm signed in — capture" to store
+              the session. No password is entered into Cadre.
+            </DialogDescription>
+          </DialogHeader>
+          {connecting ? (
+            <div className="space-y-3">
+              <ComputerView computerId={connecting.botId} />
+              {connectNote ? (
+                <p className="text-muted-foreground text-sm">{connectNote}</p>
+              ) : null}
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button onClick={() => setConnecting(null)} variant="ghost">
+              Cancel
+            </Button>
+            <Button
+              disabled={connectCapture.isPending}
+              onClick={() => {
+                if (!connecting) return;
+                connectCapture.mutate(
+                  {
+                    id: connecting.connection.id,
+                    agentId: connecting.botId,
+                  },
+                  {
+                    onSuccess: (result) => {
+                      setConnectNote(result.note);
+                      if (result.ok) setConnecting(null);
+                    },
+                  },
+                );
+              }}
+            >
+              {connectCapture.isPending
+                ? "Capturing…"
+                : "I'm signed in — capture"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageShell>
   );
 }
@@ -357,8 +457,9 @@ function EditConnectionDialog(props: {
     if (!name.trim()) missing.push("a name");
     if (!effectiveId) missing.push("a name that yields an id");
     if (!service.trim()) missing.push("a service");
-    if (!secret.trim()) {
-      missing.push(kind === "web" ? "a password" : "a token");
+    // A web login can be session-only (sign in yourself), so no password is required for it.
+    if (!secret.trim() && kind !== "web") {
+      missing.push("a token");
     }
   } else if (!name.trim()) {
     missing.push("a name");
@@ -453,7 +554,7 @@ function EditConnectionDialog(props: {
               existing
                 ? "New secret (blank keeps the stored one)"
                 : kind === "web"
-                  ? "Password"
+                  ? "Password (optional — leave blank to sign in yourself)"
                   : "Token"
             }
             type="password"
