@@ -96,6 +96,8 @@ function ConnectionsPage() {
   const [credUser, setCredUser] = useState("");
   const [credPass, setCredPass] = useState("");
   const [credTotp, setCredTotp] = useState("");
+  const [credOpRef, setCredOpRef] = useState("");
+  const [credOpAccount, setCredOpAccount] = useState("");
   const [credStatus, setCredStatus] = useState("");
   const [editing, setEditing] = useState<Connection | "new" | null>(null);
   const [granting, setGranting] = useState<Connection | null>(null);
@@ -117,8 +119,11 @@ function ConnectionsPage() {
    */
   async function signInWithCred() {
     if (!cred || !connectBot) return;
+    const useOp = credOpRef.trim().length > 0;
     setCredStatus(
-      "Saving and signing in… (this signs the browser in and captures the session)",
+      useOp
+        ? "Reading the credentials from 1Password and signing in…"
+        : "Saving and signing in… (this signs the browser in and captures the session)",
     );
     try {
       await save.mutateAsync({
@@ -128,8 +133,12 @@ function ConnectionsPage() {
         service: cred.tag,
         loginUrl: cred.loginUrl,
         username: credUser,
-        secret: credPass,
-        ...(credTotp ? { totpSeed: credTotp } : {}),
+        ...(useOp
+          ? {
+              opRef: credOpRef.trim(),
+              opAccount: credOpAccount.trim() || "my.1password.com",
+            }
+          : { secret: credPass, ...(credTotp ? { totpSeed: credTotp } : {}) }),
       });
       await grant.mutateAsync({ id: cred.id, agentId: connectBot });
       const result = await verify.mutateAsync({ id: cred.id });
@@ -315,6 +324,8 @@ function ConnectionsPage() {
                         setCredUser(conn?.username ?? "");
                         setCredPass("");
                         setCredTotp("");
+                        setCredOpRef(conn?.opRef ?? "");
+                        setCredOpAccount(conn?.opAccount ?? "");
                         setCredStatus("");
                         setCred(service);
                       }}
@@ -601,6 +612,27 @@ function ConnectionsPage() {
               type="password"
               value={credTotp}
             />
+            <div className="rounded-md border border-dashed p-3">
+              <p className="mb-2 text-muted-foreground text-xs">
+                Or pull the password and one-time code from 1Password — nothing
+                is stored in Cadre, and the container never sees 1Password. Fill
+                the item reference and leave the password blank.
+              </p>
+              <Input
+                autoComplete="off"
+                className="mb-2 font-mono text-xs"
+                onChange={(event) => setCredOpRef(event.target.value)}
+                placeholder="1Password item, e.g. op://Private/Microsoft 365"
+                value={credOpRef}
+              />
+              <Input
+                autoComplete="off"
+                className="font-mono text-xs"
+                onChange={(event) => setCredOpAccount(event.target.value)}
+                placeholder="Account (default my.1password.com)"
+                value={credOpAccount}
+              />
+            </div>
             {credStatus ? (
               <p className="text-muted-foreground text-sm">{credStatus}</p>
             ) : null}
@@ -623,7 +655,11 @@ function ConnectionsPage() {
               Cancel
             </Button>
             <Button
-              disabled={!credUser || !credPass || verify.isPending}
+              disabled={
+                !credUser ||
+                (!credPass && !credOpRef.trim()) ||
+                verify.isPending
+              }
               onClick={signInWithCred}
             >
               {verify.isPending ? "Signing in…" : "Sign in & capture"}

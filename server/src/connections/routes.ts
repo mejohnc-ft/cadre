@@ -62,6 +62,8 @@ export function createConnectionRoutes(input: {
       baseUrl?: unknown;
       loginUrl?: unknown;
       username?: unknown;
+      opRef?: unknown;
+      opAccount?: unknown;
       secret?: unknown;
       totpSeed?: unknown;
       allowedPaths?: unknown;
@@ -107,6 +109,11 @@ export function createConnectionRoutes(input: {
         baseUrl: typeof body.baseUrl === "string" ? body.baseUrl : null,
         loginUrl: typeof body.loginUrl === "string" ? body.loginUrl : null,
         username: typeof body.username === "string" ? body.username : null,
+        opRef: typeof body.opRef === "string" && body.opRef ? body.opRef : null,
+        opAccount:
+          typeof body.opAccount === "string" && body.opAccount
+            ? body.opAccount
+            : null,
         ...(typeof body.secret === "string" && body.secret
           ? { secret: body.secret }
           : {}),

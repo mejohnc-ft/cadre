@@ -176,6 +176,13 @@
       "when": 1787606215799,
       "tag": "0024_connection-session-only",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1787614388727,
+      "tag": "0025_connection-onepassword",
+      "breakpoints": true
     }
   ]
 }

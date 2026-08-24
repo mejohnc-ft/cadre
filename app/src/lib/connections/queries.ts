@@ -10,6 +10,8 @@ export type Connection = {
   loginUrl: string | null;
   username: string | null;
   hasTotp: boolean;
+  opRef: string | null;
+  opAccount: string | null;
   allowedPaths: string[] | null;
   notes: string | null;
   grants: string[];

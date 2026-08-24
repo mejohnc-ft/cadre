@@ -16,6 +16,8 @@ export function saveConnectionMutationOptions(queryClient: QueryClient) {
       baseUrl?: string;
       loginUrl?: string;
       username?: string;
+      opRef?: string | null;
+      opAccount?: string | null;
       secret?: string;
       totpSeed?: string;
       allowedPaths?: string[] | null;

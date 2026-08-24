@@ -123,6 +123,7 @@ export type ComputerGatewayOptions = {
     get(connectionId: string): Promise<{ username: string | null } | null>;
     secretOf(connectionId: string): Promise<string | null>;
     totpSeedOf(connectionId: string): Promise<string | null>;
+    totpCodeOf(connectionId: string): Promise<string | null>;
     sessionOf(connectionId: string): Promise<string | null>;
   };
 };
@@ -848,8 +849,7 @@ export function createComputerGateway(
           } else if (input.field === "username") {
             value = (await vault.get(input.connection))?.username ?? null;
           } else if (input.field === "totp") {
-            const seed = await vault.totpSeedOf(input.connection);
-            value = seed ? await totpCode(seed) : null;
+            value = await vault.totpCodeOf(input.connection);
           }
           if (!value) {
             throw new ActionRefusedError(

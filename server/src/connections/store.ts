@@ -4,6 +4,8 @@ import { recordAuditEvent } from "../audit";
 import { decryptSecret, encryptSecret } from "../credentials";
 import type { Database } from "../db/client";
 import { connectionGrants, connections } from "../db/schema";
+import { opOtp, opPassword } from "./onepassword";
+import { totpCode } from "./totp";
 
 /**
  * The connections vault: named credentials for outside services, readable by no coworker.
@@ -27,6 +29,8 @@ export type Connection = {
   loginUrl: string | null;
   username: string | null;
   hasTotp: boolean;
+  opRef: string | null;
+  opAccount: string | null;
   allowedPaths: string[] | null;
   notes: string | null;
   grants: string[];
@@ -52,6 +56,8 @@ function toConnection(
     loginUrl: row.loginUrl,
     username: row.username,
     hasTotp: row.totpEncrypted !== null,
+    opRef: row.opRef,
+    opAccount: row.opAccount,
     allowedPaths: row.allowedPaths ?? null,
     notes: row.notes,
     lastVerifiedAt: row.lastVerifiedAt?.toISOString() ?? null,
@@ -116,6 +122,8 @@ export function createConnectionStore(
       baseUrl?: string | null;
       loginUrl?: string | null;
       username?: string | null;
+      opRef?: string | null;
+      opAccount?: string | null;
       secret?: string;
       totpSeed?: string | null;
       allowedPaths?: string[] | null;
@@ -160,6 +168,8 @@ export function createConnectionStore(
         baseUrl: input.baseUrl ?? null,
         loginUrl: input.loginUrl ?? null,
         username: input.username ?? null,
+        opRef: input.opRef ?? null,
+        opAccount: input.opAccount ?? null,
         allowedPaths:
           input.allowedPaths === undefined ? null : input.allowedPaths,
         notes: input.notes ?? null,
@@ -289,13 +299,42 @@ export function createConnectionStore(
     /** The decrypted secret, for the egress proxy and the secret-typing verb alone. */
     async secretOf(id: string): Promise<string | null> {
       const [row] = await database
-        .select({ secretEncrypted: connections.secretEncrypted })
+        .select({
+          secretEncrypted: connections.secretEncrypted,
+          opRef: connections.opRef,
+          opAccount: connections.opAccount,
+        })
         .from(connections)
         .where(eq(connections.id, id))
         .limit(1);
-      return row?.secretEncrypted
+      if (!row) return null;
+      // Sourced from 1Password on the host, read fresh and never stored, when a reference is set.
+      if (row.opRef) {
+        return opPassword(row.opAccount ?? "", row.opRef);
+      }
+      return row.secretEncrypted
         ? decryptSecret(encryptionKey, row.secretEncrypted)
         : null;
+    },
+
+    /** The current one-time code: from 1Password if referenced, else computed from a stored seed. */
+    async totpCodeOf(id: string): Promise<string | null> {
+      const [row] = await database
+        .select({
+          totpEncrypted: connections.totpEncrypted,
+          opRef: connections.opRef,
+          opAccount: connections.opAccount,
+        })
+        .from(connections)
+        .where(eq(connections.id, id))
+        .limit(1);
+      if (!row) return null;
+      if (row.opRef) {
+        return opOtp(row.opAccount ?? "", row.opRef);
+      }
+      if (!row.totpEncrypted) return null;
+      const seed = await decryptSecret(encryptionKey, row.totpEncrypted);
+      return totpCode(seed);
     },
 
     /** Seal a captured browser session onto the connection. The plaintext is never returned. */

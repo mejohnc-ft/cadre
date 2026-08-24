@@ -36,6 +36,14 @@ export const connections = pgTable("connections", {
   loginUrl: text("login_url"),
   /** For web logins: the account name, which is not a secret and may be typed openly. */
   username: text("username"),
+  /**
+   * A 1Password item to source the password (and current one-time code) from at sign-in, instead
+   * of storing them here. The server reads them with `op` on the host and injects them into the
+   * coworker's browser; the container never sees 1Password. `opAccount` + `opRef` like
+   * my.1password.com + op://Private/Microsoft 365.
+   */
+  opAccount: text("op_account"),
+  opRef: text("op_ref"),
   /** Null for a session-only web login: connected by signing in yourself, no password stored. */
   secretEncrypted: text("secret_encrypted"),
   /** TOTP seed for logins with one-time codes; the server computes the six digits. */
