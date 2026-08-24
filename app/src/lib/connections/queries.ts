@@ -13,6 +13,9 @@ export type Connection = {
   allowedPaths: string[] | null;
   notes: string | null;
   grants: string[];
+  lastVerifiedAt: string | null;
+  lastVerifyStatus: string | null;
+  lastVerifyNote: string | null;
   updatedAt: string;
 };
 

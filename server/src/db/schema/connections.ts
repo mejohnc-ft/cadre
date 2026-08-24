@@ -45,6 +45,11 @@ export const connections = pgTable("connections", {
    */
   allowedPaths: jsonb("allowed_paths").$type<string[]>(),
   notes: text("notes"),
+  /** When a verification run last proved this credential signs in, and what it saw. */
+  lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
+  /** "ok" | "failed" */
+  lastVerifyStatus: text("last_verify_status"),
+  lastVerifyNote: text("last_verify_note"),
   createdAt: createdAt(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()

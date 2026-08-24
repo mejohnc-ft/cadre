@@ -30,6 +30,9 @@ export type Connection = {
   allowedPaths: string[] | null;
   notes: string | null;
   grants: string[];
+  lastVerifiedAt: string | null;
+  lastVerifyStatus: string | null;
+  lastVerifyNote: string | null;
   updatedAt: string;
 };
 
@@ -48,6 +51,9 @@ function toConnection(
     hasTotp: row.totpEncrypted !== null,
     allowedPaths: row.allowedPaths ?? null,
     notes: row.notes,
+    lastVerifiedAt: row.lastVerifiedAt?.toISOString() ?? null,
+    lastVerifyStatus: row.lastVerifyStatus,
+    lastVerifyNote: row.lastVerifyNote,
     grants,
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -251,6 +257,27 @@ export function createConnectionStore(
         )
         .limit(1);
       return row !== undefined;
+    },
+
+    /** What a verification run concluded, written to the connection it verified. */
+    async recordVerify(
+      id: string,
+      outcome: { status: "ok" | "failed"; note: string },
+    ): Promise<void> {
+      await database
+        .update(connections)
+        .set({
+          lastVerifiedAt: new Date(),
+          lastVerifyStatus: outcome.status,
+          lastVerifyNote: outcome.note.slice(0, 500),
+        })
+        .where(eq(connections.id, id));
+      await recordAuditEvent(audit, {
+        eventType: "connection.verified",
+        targetType: "connection",
+        targetId: id,
+        payload: { connection: id, status: outcome.status },
+      });
     },
 
     /** The decrypted secret, for the egress proxy and the secret-typing verb alone. */

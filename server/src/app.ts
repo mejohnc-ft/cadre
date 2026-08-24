@@ -39,6 +39,7 @@ import { createComputerRoutes } from "./computer/routes";
 import { configuredAuthProviders, type DeploymentConfig } from "./config";
 import { createConnectionRoutes } from "./connections/routes";
 import type { ConnectionStore } from "./connections/store";
+import { createConnectionVerifier } from "./connections/verify";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
 import type { Database } from "./db/client";
 import { createEgressRoutes } from "./egress/routes";
@@ -719,7 +720,18 @@ export function createApp(
   if (connections) {
     app.route(
       "/api",
-      createConnectionRoutes({ store: connections, requireUser }),
+      createConnectionRoutes({
+        store: connections,
+        requireUser,
+        ...(computerGateway
+          ? {
+              verifier: createConnectionVerifier({
+                gateway: computerGateway,
+                store: connections,
+              }),
+            }
+          : {}),
+      }),
     );
   }
 

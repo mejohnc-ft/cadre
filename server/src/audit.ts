@@ -42,6 +42,7 @@ export const auditEventTypes = [
   "connection.granted",
   "connection.revoked",
   "connection.secret_typed",
+  "connection.verified",
   "connector.sync_succeeded",
   "connector.sync_failed",
   "knowledge.searched",

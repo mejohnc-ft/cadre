@@ -41,6 +41,7 @@ import {
   removeConnectionMutationOptions,
   revokeConnectionMutationOptions,
   saveConnectionMutationOptions,
+  verifyConnectionMutationOptions,
 } from "@/lib/connections/mutations";
 import {
   type Connection,
@@ -59,6 +60,8 @@ function ConnectionsPage() {
   const remove = useMutation(removeConnectionMutationOptions(queryClient));
   const grant = useMutation(grantConnectionMutationOptions(queryClient));
   const revoke = useMutation(revokeConnectionMutationOptions(queryClient));
+  const verify = useMutation(verifyConnectionMutationOptions(queryClient));
+  const [verifying, setVerifying] = useState<string | null>(null);
   const [editing, setEditing] = useState<Connection | "new" | null>(null);
   const [granting, setGranting] = useState<Connection | null>(null);
   const [grantee, setGrantee] = useState("");
@@ -95,6 +98,19 @@ function ConnectionsPage() {
                       {connection.hasTotp ? (
                         <Badge variant="secondary">totp</Badge>
                       ) : null}
+                      {connection.lastVerifyStatus ? (
+                        <Badge
+                          variant={
+                            connection.lastVerifyStatus === "ok"
+                              ? "secondary"
+                              : "destructive"
+                          }
+                        >
+                          {connection.lastVerifyStatus === "ok"
+                            ? "sign-in verified"
+                            : "verify failed"}
+                        </Badge>
+                      ) : null}
                       {connection.kind === "api" ? (
                         <Badge
                           variant={
@@ -117,10 +133,31 @@ function ConnectionsPage() {
                         {connection.grants.length === 0
                           ? "Granted to nobody yet"
                           : `Granted to ${connection.grants.join(", ")}`}
+                        {connection.lastVerifyNote
+                          ? ` · ${connection.lastVerifyNote}`
+                          : ""}
                       </span>
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>
+                    {connection.kind === "web" ? (
+                      <Button
+                        disabled={verify.isPending}
+                        onClick={() => {
+                          setVerifying(connection.id);
+                          verify.mutate(
+                            { id: connection.id },
+                            { onSettled: () => setVerifying(null) },
+                          );
+                        }}
+                        size="sm"
+                        variant="outline"
+                      >
+                        {verifying === connection.id
+                          ? "Signing in…"
+                          : "Verify sign-in"}
+                      </Button>
+                    ) : null}
                     <Button
                       onClick={() => {
                         setGrantee("");

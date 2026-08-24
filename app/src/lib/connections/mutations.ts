@@ -73,3 +73,26 @@ export function revokeConnectionMutationOptions(queryClient: QueryClient) {
     onSuccess: () => invalidate(queryClient),
   });
 }
+
+export function verifyConnectionMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (input: {
+      id: string;
+      agentId?: string;
+    }): Promise<{ status: "ok" | "failed"; note: string }> => {
+      const response = await client(
+        `/api/admin/connections/${encodeURIComponent(input.id)}/verify`,
+        {
+          method: "POST",
+          body: input.agentId ? { agentId: input.agentId } : {},
+          fallback: "The verification could not run.",
+        },
+      );
+      return (await response.json()) as {
+        status: "ok" | "failed";
+        note: string;
+      };
+    },
+    onSettled: () => invalidate(queryClient),
+  });
+}

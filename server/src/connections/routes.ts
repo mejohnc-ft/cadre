@@ -6,6 +6,7 @@ import {
   type ConnectionKind,
   type ConnectionStore,
 } from "./store";
+import type { ConnectionVerifier } from "./verify";
 
 /**
  * The connections vault's routes: list, save, grant. Secrets are write-only — no route returns
@@ -25,6 +26,8 @@ function isKind(value: unknown): value is ConnectionKind {
 export function createConnectionRoutes(input: {
   store: ConnectionStore;
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>;
+  /** Absent when this deployment has no computer gateway; the verify route then answers 503. */
+  verifier?: ConnectionVerifier;
 }) {
   const app = new Hono<{ Variables: AppVariables }>();
   const admin = input.requireUser;
@@ -129,6 +132,43 @@ export function createConnectionRoutes(input: {
     return removed
       ? context.json({ ok: true })
       : context.json({ error: "No such connection." }, 404);
+  });
+
+  /**
+   * Intake's affirmation: walk a granted coworker's browser through the real sign-in and record
+   * what happened. The response carries the outcome; the connection remembers it.
+   */
+  app.post("/admin/connections/:id/verify", admin, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) return denied;
+    if (!input.verifier) {
+      return context.json(
+        { error: "This deployment has no computer to verify with." },
+        503,
+      );
+    }
+    const connection = await input.store.get(context.req.param("id"));
+    if (!connection) return context.json({ error: "No such connection." }, 404);
+    const body = (await context.req.json().catch(() => null)) as {
+      agentId?: unknown;
+    } | null;
+    const botId =
+      typeof body?.agentId === "string" && body.agentId
+        ? body.agentId
+        : connection.grants[0];
+    if (!botId) {
+      return context.json(
+        {
+          error:
+            "Grant the connection to a coworker first; the verification runs in its computer.",
+        },
+        400,
+      );
+    }
+    const outcome = await input.verifier.verify(connection.id, botId, {
+      id: context.var.actor.id,
+    });
+    return context.json(outcome);
   });
 
   app.post("/admin/connections/:id/grants", admin, async (context) => {
