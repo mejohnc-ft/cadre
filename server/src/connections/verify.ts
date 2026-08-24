@@ -237,6 +237,9 @@ export function createConnectionVerifier(input: {
       return { ok: false, note: `${botId} has no grant for ${connectionId}.` };
     }
     try {
+      // Release any stale human control first, so a re-run (or a previous connect that was never
+      // captured) can navigate rather than being refused with "a person has control".
+      await gateway.releaseControl(botId, actor).catch(() => undefined);
       await gateway.navigate(botId, actor, connection.loginUrl);
       await gateway.takeControl(botId, actor);
       return {

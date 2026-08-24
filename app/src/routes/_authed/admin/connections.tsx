@@ -109,11 +109,12 @@ function ConnectionsPage() {
         id: service.id,
         agentId: connectBot,
       });
+      setConnectNote(result.note);
+      if (!result.ok) return;
       const conn = (
         await queryClient.fetchQuery(connectionsQueryOptions())
       ).connections.find((c) => c.id === service.id);
       if (conn && result.botId) {
-        setConnectNote(result.note);
         setConnecting({ connection: conn, botId: result.botId });
       }
     } finally {
