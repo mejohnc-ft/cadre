@@ -111,6 +111,9 @@ export function createConnectionVerifier(input: {
     actor: ActionActor,
   ): Promise<VerifyOutcome> {
     try {
+      // Release any stale human control first — a prior connect that was never captured can leave
+      // the computer held, which would refuse the navigate below.
+      await gateway.releaseControl(botId, actor).catch(() => undefined);
       await gateway.navigate(botId, actor, loginUrl);
       /*
        * Up to four rounds, because real sign-ins are staircases: Microsoft's is an email page,
