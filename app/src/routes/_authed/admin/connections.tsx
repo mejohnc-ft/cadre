@@ -69,8 +69,10 @@ function ConnectionsPage() {
     connectCaptureMutationOptions(queryClient),
   );
   const [verifying, setVerifying] = useState<string | null>(null);
+  // The connect dialog opens IMMEDIATELY on click — before any slow work — so it always appears.
   const [connecting, setConnecting] = useState<{
-    connection: Connection;
+    id: string;
+    name: string;
     botId: string;
   } | null>(null);
   const [connectNote, setConnectNote] = useState("");
@@ -80,22 +82,26 @@ function ConnectionsPage() {
 
   const rows = connections.data?.connections ?? [];
   const agentIds = agents.data?.map((agent) => agent.id) ?? [];
-  const [quickBusy, setQuickBusy] = useState<string | null>(null);
 
   // The coworker whose browser the login runs in. Prefer Incident Buddy; fall back to the first.
   const connectBot = agentIds.includes("incident-buddy")
     ? "incident-buddy"
     : agentIds[0];
 
-  /** One click: create the connection, grant it, open the real login, hand over the live screen. */
-  async function quickConnect(service: {
+  /**
+   * Open the sign-in dialog and start the login. The dialog appears at once (the live screen shows
+   * the browser booting); the slow work — ensure the connection, grant it, open the real login —
+   * runs after, with its status shown in the dialog. Nothing can make the click do nothing.
+   */
+  async function openConnect(service: {
     id: string;
     name: string;
     loginUrl: string;
     tag: string;
   }) {
     if (!connectBot) return;
-    setQuickBusy(service.id);
+    setConnectNote("Starting the browser and opening the sign-in page…");
+    setConnecting({ id: service.id, name: service.name, botId: connectBot });
     try {
       await save.mutateAsync({
         id: service.id,
@@ -109,16 +115,15 @@ function ConnectionsPage() {
         id: service.id,
         agentId: connectBot,
       });
-      setConnectNote(result.note);
-      if (!result.ok) return;
-      const conn = (
-        await queryClient.fetchQuery(connectionsQueryOptions())
-      ).connections.find((c) => c.id === service.id);
-      if (conn && result.botId) {
-        setConnecting({ connection: conn, botId: result.botId });
-      }
-    } finally {
-      setQuickBusy(null);
+      setConnectNote(
+        result.ok
+          ? "Sign in on the screen below — password, MFA, everything — then click Capture."
+          : `Could not open the sign-in: ${result.note}`,
+      );
+    } catch (error) {
+      setConnectNote(
+        `Could not open the sign-in: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
@@ -132,47 +137,73 @@ function ConnectionsPage() {
       description="Credentials for the services your coworkers' workflows touch — API tokens, CLI logins, website passwords. A secret is stored encrypted, never shown again, and never enters a computer: API calls go through the egress proxy and web passwords are typed by the server. Use is granted per coworker."
       title="Connections"
     >
-      <PageSection title="Connect a service">
+      <PageSection title="Sessions">
         <p className="mb-3 text-muted-foreground text-sm">
-          One click opens the real sign-in page in {connectBot ?? "a coworker"}
-          's browser. You sign in — password, MFA, everything — on the vendor's
-          own page, and the session is captured. No password is entered into
-          Cadre.
+          The browser sign-ins Cadre keeps for systems that need one. You sign
+          in yourself on the vendor's real page — password, MFA, everything — in{" "}
+          {connectBot ?? "a coworker"}'s browser, and the session is captured.
+          No password is entered into Cadre; sessions are encrypted at rest and
+          never leave the server.
         </p>
-        <div className="flex flex-wrap gap-2">
+        <PageRows>
           {[
             {
               tag: "microsoft",
               id: "m365-admin",
               name: "Microsoft 365 Admin",
+              provider: "Microsoft · admin center sign-in",
               loginUrl: "https://admin.microsoft.com",
-              label: "Connect Microsoft 365",
+            },
+            {
+              tag: "microsoft",
+              id: "outlook",
+              name: "Outlook",
+              provider: "Microsoft · web sign-in",
+              loginUrl: "https://outlook.office.com/mail/",
             },
             {
               tag: "google",
               id: "google-workspace",
               name: "Google Workspace Admin",
+              provider: "Google · admin console sign-in",
               loginUrl: "https://admin.google.com",
-              label: "Connect Google Workspace",
             },
-            {
-              tag: "microsoft",
-              id: "outlook",
-              name: "Outlook (Microsoft)",
-              loginUrl: "https://outlook.office.com/mail/",
-              label: "Connect Outlook",
-            },
-          ].map((service) => (
-            <Button
-              disabled={!connectBot || quickBusy !== null}
-              key={service.id}
-              onClick={() => quickConnect(service)}
-              variant="outline"
-            >
-              {quickBusy === service.id ? "Opening…" : service.label}
-            </Button>
-          ))}
-        </div>
+          ].map((service, index) => {
+            const conn = rows.find((c) => c.id === service.id);
+            const connected = Boolean(conn?.hasSession);
+            return (
+              <div key={service.id}>
+                {index > 0 ? <Separator /> : null}
+                <Item>
+                  <ItemContent>
+                    <ItemTitle className="flex items-center gap-2">
+                      {service.name}
+                      <Badge variant={connected ? "secondary" : "outline"}>
+                        {connected ? "Connected" : "Not connected"}
+                      </Badge>
+                    </ItemTitle>
+                    <ItemDescription>
+                      {service.provider}
+                      {conn?.sessionCapturedAt
+                        ? ` · signed in ${new Date(conn.sessionCapturedAt).toLocaleString()}`
+                        : ""}
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <Button
+                      disabled={!connectBot}
+                      onClick={() => openConnect(service)}
+                      size="sm"
+                      variant={connected ? "outline" : "default"}
+                    >
+                      {connected ? "Reconnect" : "Connect"}
+                    </Button>
+                  </ItemActions>
+                </Item>
+              </div>
+            );
+          })}
+        </PageRows>
       </PageSection>
 
       <PageSection title="Vault">
@@ -239,29 +270,17 @@ function ConnectionsPage() {
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>
-                    {connection.kind === "web" ? (
+                    {connection.kind === "web" && connection.loginUrl ? (
                       <Button
-                        disabled={
-                          connectBegin.isPending ||
-                          connection.grants.length === 0
+                        disabled={!connectBot || connection.grants.length === 0}
+                        onClick={() =>
+                          openConnect({
+                            id: connection.id,
+                            name: connection.name,
+                            loginUrl: connection.loginUrl as string,
+                            tag: connection.service,
+                          })
                         }
-                        onClick={() => {
-                          setConnectNote("Opening the sign-in page…");
-                          connectBegin.mutate(
-                            { id: connection.id },
-                            {
-                              onSuccess: (result) => {
-                                if (result.botId) {
-                                  setConnecting({
-                                    connection,
-                                    botId: result.botId,
-                                  });
-                                }
-                                setConnectNote(result.note);
-                              },
-                            },
-                          );
-                        }}
                         size="sm"
                         title={
                           connection.grants.length === 0
@@ -428,7 +447,7 @@ function ConnectionsPage() {
       >
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Sign in to {connecting?.connection.name}</DialogTitle>
+            <DialogTitle>Sign in to {connecting?.name}</DialogTitle>
             <DialogDescription>
               This is the real vendor page, open in {connecting?.botId}'s
               browser. Click "Take control" below, sign in yourself — password,
@@ -454,7 +473,7 @@ function ConnectionsPage() {
                 if (!connecting) return;
                 connectCapture.mutate(
                   {
-                    id: connecting.connection.id,
+                    id: connecting.id,
                     agentId: connecting.botId,
                   },
                   {
