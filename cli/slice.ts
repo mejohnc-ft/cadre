@@ -251,9 +251,6 @@ async function up() {
         // Computers reach this server on the VM bridge; the harness reaches its model as the
         // deployment configured, never from anything baked into the image.
         COMPUTER_SERVER_URL: `http://192.168.64.1:${SERVER_PORT}`,
-        ...(env.OPENAI_API_KEY
-          ? { HARNESS_ANTHROPIC_AUTH_TOKEN: env.OPENAI_API_KEY }
-          : {}),
         ...(env.HARNESS_ANTHROPIC_BASE_URL
           ? { HARNESS_ANTHROPIC_BASE_URL: env.HARNESS_ANTHROPIC_BASE_URL }
           : {}),

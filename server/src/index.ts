@@ -599,14 +599,24 @@ const app = createApp(
       artifactsFor: (botId) => artifactStore.resolveForRun(botId),
       modelFor: async (botId) => {
         const route = await providerStore.routeFor(botId);
-        return route
-          ? {
-              kind: route.kind,
-              baseUrl: route.baseUrl,
-              model: route.model,
-              key: route.key,
-            }
-          : null;
+        if (!route) return null;
+        // Egress by default: the computer gets the proxy path and no key. HARNESS_EGRESS=direct
+        // reverts to handing the key into the computer's per-run config.
+        if (process.env.HARNESS_EGRESS?.trim() === "direct") {
+          return {
+            kind: route.kind,
+            baseUrl: route.baseUrl,
+            model: route.model,
+            key: route.key,
+          };
+        }
+        return {
+          kind: route.kind,
+          baseUrl: route.baseUrl,
+          model: route.model,
+          providerId: route.providerId,
+          egress: true,
+        };
       },
     },
   ),

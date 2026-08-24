@@ -41,6 +41,8 @@ type RunModel = {
   baseUrl?: string | null;
   model?: string;
   key?: string;
+  providerId?: string;
+  egress?: boolean;
 };
 type RunInput = {
   threadId: string;
@@ -114,6 +116,20 @@ export function createHarness(options: HarnessOptions) {
   const provider = "slice";
 
   function modelSettings(run?: RunModel) {
+    /*
+     * Egress: the model endpoint is the server's proxy and the credential is the computer token —
+     * a secret this computer already holds and which opens nothing but that proxy. The provider's
+     * own key never arrives here.
+     */
+    if (run?.egress && run.providerId && options.serverUrl) {
+      const proxied = `${options.serverUrl}/api/egress/${run.providerId}`;
+      return {
+        modelId: run.model || "glm-5.3",
+        openaiBase: run.kind?.startsWith("openai") ? proxied : "",
+        anthropicBase: run.kind?.startsWith("anthropic") ? proxied : "",
+        apiKey: options.computerToken,
+      };
+    }
     return {
       modelId: run?.model || process.env.HARNESS_MODEL || "glm-5.3",
       openaiBase:

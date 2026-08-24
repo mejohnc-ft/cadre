@@ -191,6 +191,16 @@ export function createProviderStore(database: Database, encryptionKey: string) {
       return removed.length > 0;
     },
 
+    /** A provider's decrypted key, for the egress proxy alone. */
+    async secretOf(providerId: string): Promise<string | null> {
+      const [row] = await database
+        .select({ keyEncrypted: modelProviders.keyEncrypted })
+        .from(modelProviders)
+        .where(eq(modelProviders.id, providerId))
+        .limit(1);
+      return row ? decryptSecret(encryptionKey, row.keyEncrypted) : null;
+    },
+
     /**
      * The route a run uses: the coworker's own, else the default provider. Null when the
      * deployment has no providers — the caller falls back to the environment.

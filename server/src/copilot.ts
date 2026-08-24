@@ -228,7 +228,11 @@ export type HarnessModel = {
   kind: string;
   baseUrl: string | null;
   model: string;
-  key: string;
+  /** Present only when egress is off; with the proxy, the computer needs no key at all. */
+  key?: string;
+  providerId?: string;
+  /** Reach the model through the server's egress proxy; the computer holds no provider key. */
+  egress?: boolean;
 };
 
 export type HarnessRuntime = {

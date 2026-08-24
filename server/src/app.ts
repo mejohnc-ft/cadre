@@ -30,6 +30,7 @@ import { createThreadReader } from "./channels/thread-status";
 import type { ComputerProvider } from "./computer/provider";
 import type { ActionPolicy } from "./computer/policy";
 import { createArtifactRoutes } from "./artifacts/routes";
+import { createEgressRoutes } from "./egress/routes";
 import { createProviderRoutes } from "./providers/routes";
 import type { ProviderStore } from "./providers/store";
 import type { Database } from "./db/client";
@@ -682,6 +683,20 @@ export function createApp(
     app.route(
       "/api",
       createArtifactRoutes({ store: artifactStore, requireUser }),
+    );
+  }
+
+  if (providers && harness) {
+    /*
+     * The model egress proxy sits beside the harness gateway: the same computer token opens both,
+     * and the provider key stays on this side of the line.
+     */
+    app.route(
+      "/api",
+      createEgressRoutes({
+        providers: providers.store,
+        computerToken: harness.computerToken,
+      }),
     );
   }
 

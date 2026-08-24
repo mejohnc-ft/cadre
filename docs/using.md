@@ -187,3 +187,16 @@ Kinds: `anthropic`, `openai`, `anthropic-compatible`, `openai-compatible`. On fi
 providers, one is seeded from the environment so existing deployments keep working. Built-in Bots
 use the default openai-shaped provider; harness coworkers follow their route (Claude Code speaks
 anthropic-shaped endpoints, Pi/OpenCode openai-shaped).
+
+## Secrets never enter the sandbox: the egress proxy
+
+By default a harness reaches its model through the server's egress proxy, not directly. The
+computer is pointed at `http://<server>/api/egress/<provider>` and authenticates with the
+**computer token** — a secret it already holds that opens nothing but the proxy. The server swaps
+that for the provider's real key (held encrypted in the provider table), forwards the model call,
+and streams the answer back. A prompt-injected agent that dumps its environment finds no provider
+key to steal — verified: `HARNESS_ANTHROPIC_AUTH_TOKEN` is absent from a running harness VM.
+
+Only model API paths are forwarded (`/v1/messages`, `/chat/completions`), so the proxy is a model
+wire, not a tunnel. Set `HARNESS_EGRESS=direct` on the server to hand the key into the computer
+instead (the pre-proxy behaviour), e.g. for a provider the proxy cannot yet translate.
