@@ -3,19 +3,19 @@ import { Hono } from "hono";
 import type { BotAccessCheck } from "../agents/profile-policy";
 import type { AppVariables } from "../auth/guards";
 import { requireAdmin } from "../auth/guards";
+import { DEPLOYMENT_ROUTES } from "./deployment-routes";
 import {
   type ActionActor,
   ActionRefusedError,
   type ComputerGateway,
   ComputerUnavailableError,
   ElementNotFoundError,
-  NavigationRefusedError,
   HumanHasControlError,
+  NavigationRefusedError,
   StaleSnapshotError,
   WorkspaceRefusedError,
   WorkspaceRequestError,
 } from "./gateway";
-import { DEPLOYMENT_ROUTES } from "./deployment-routes";
 import { type PolicyStore, parseActionPolicy } from "./policy-store";
 
 /**
@@ -173,6 +173,30 @@ export function createComputerRoutes(
         },
         signal,
       );
+    }),
+  );
+
+  routes.post("/:botId/type_secret", (context) =>
+    act(context, (botId, actor, body) => {
+      if (
+        typeof body?.ref !== "string" ||
+        typeof body?.snapshotId !== "number" ||
+        typeof body?.connection !== "string" ||
+        (body?.field !== "password" &&
+          body?.field !== "username" &&
+          body?.field !== "totp")
+      ) {
+        return {
+          error:
+            "type_secret needs ref, snapshotId, connection, and field (password | username | totp).",
+        };
+      }
+      return gateway.typeSecret(botId, actor, {
+        ref: body.ref,
+        snapshotId: body.snapshotId,
+        connection: body.connection,
+        field: body.field,
+      });
     }),
   );
 

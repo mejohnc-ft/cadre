@@ -34,6 +34,7 @@ import {
 import { createSnapshotStore } from "./computer/snapshot-store";
 import type { SupervisorProvider } from "./computer/supervisor";
 import { bindAddresses, loadConfig } from "./config";
+import { createConnectionStore } from "./connections/store";
 import {
   actorForAgent,
   type IdentifyActor,
@@ -229,6 +230,11 @@ const triggerEngine = createTriggerEngine({
   selfUrl: `http://127.0.0.1:${Number.parseInt(process.env.PORT ?? "3001", 10)}`,
 });
 const providerStore = createProviderStore(database, config.keyEncryptionKey);
+const connectionStore = createConnectionStore(
+  database,
+  config.keyEncryptionKey,
+  createAuditStore(database),
+);
 /*
  * Seed providers from the environment the first time. A deployment configured before providers
  * existed keeps working, and its configuration becomes visible, editable data.
@@ -317,6 +323,7 @@ const computerGateway = computerProvider
       snapshots: createSnapshotStore(database),
       allowPrivateHosts: config.computer?.allowPrivateHosts,
       token: config.computer?.token,
+      connections: connectionStore,
     })
   : undefined;
 
@@ -671,6 +678,7 @@ const app = createApp(
   artifactStore,
   { store: providerStore, database },
   triggerEngine,
+  connectionStore,
 );
 
 /**

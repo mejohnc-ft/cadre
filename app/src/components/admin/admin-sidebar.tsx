@@ -11,6 +11,7 @@ import {
   IconLayoutGrid,
   IconListDetails,
   IconPackage,
+  IconPlug,
   IconPuzzle,
   IconShieldCheck,
   IconUsers,
@@ -84,6 +85,11 @@ const GROUPS: {
         title: "Artifacts",
         icon: IconPackage,
         linkOptions: { to: "/admin/artifacts" },
+      },
+      {
+        title: "Connections",
+        icon: IconPlug,
+        linkOptions: { to: "/admin/connections" },
       },
       {
         title: "Triggers",

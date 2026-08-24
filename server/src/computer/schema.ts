@@ -23,6 +23,7 @@ export const COMPUTER_TOOLS = [
   "computer_snapshot",
   "computer_click",
   "computer_type",
+  "computer_type_secret",
   "computer_key",
   "computer_scroll",
   "computer_read_file",
@@ -50,6 +51,7 @@ export const COMPUTER_ACTING_TOOLS = [
   "computer_navigate",
   "computer_click",
   "computer_type",
+  "computer_type_secret",
   "computer_key",
   "computer_scroll",
   "computer_read_file",
@@ -152,6 +154,20 @@ export type TypeInput = ActionTarget & {
   submit?: boolean;
 };
 export type KeyInput = Partial<ActionTarget> & { key: string };
+
+/**
+ * Typing a vault secret the Bot never sees.
+ *
+ * The Bot names a granted connection and which of its values it needs — the password, the
+ * username, or this half-minute's TOTP code — and the field the value goes into. The server
+ * decrypts and delivers; the value crosses neither the model's context nor the computer's
+ * environment, and the audit row carries the connection's name and a character count, never the
+ * value.
+ */
+export type TypeSecretInput = ActionTarget & {
+  connection: string;
+  field: "password" | "username" | "totp";
+};
 export type ScrollInput = { deltaY?: number };
 
 /**

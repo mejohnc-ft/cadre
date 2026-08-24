@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { ConnectionStore } from "../connections/store";
 import type { ProviderStore } from "../providers/store";
 
 /**
@@ -27,10 +28,91 @@ const ALLOWED_PATHS = [
 export function createEgressRoutes(input: {
   providers: ProviderStore;
   computerToken: string | undefined;
+  /** The connections vault; absent, the connection egress answers 404. */
+  connections?: ConnectionStore;
   fetchImpl?: typeof fetch;
 }) {
   const app = new Hono();
   const doFetch = input.fetchImpl ?? fetch;
+
+  /**
+   * API-connection egress: `/egress/conn/:botId/:connectionId/<path>` forwards to the
+   * connection's base URL with its token injected as a bearer. The same shape as the model
+   * egress — the computer authenticates with its token, the secret never enters it — plus a
+   * grant check, because a model call is what a computer is for and a Netlify deploy is not.
+   */
+  app.all("/egress/conn/:botId/:connectionId/*", async (context) => {
+    const offered =
+      context.req.header("authorization")?.replace(/^Bearer\s+/i, "") ??
+      context.req.header("x-api-key") ??
+      "";
+    if (!input.computerToken || offered !== input.computerToken) {
+      return context.json({ error: "Not a computer." }, 401);
+    }
+    const vault = input.connections;
+    if (!vault) return context.json({ error: "No connections vault." }, 404);
+    const botId = context.req.param("botId");
+    const connectionId = context.req.param("connectionId");
+    const connection = await vault.get(connectionId);
+    if (!connection || connection.kind !== "api") {
+      return context.json({ error: "No such connection." }, 404);
+    }
+    if (!connection.baseUrl) {
+      return context.json({ error: "The connection has no base URL." }, 503);
+    }
+    if (!(await vault.allowed(connectionId, botId))) {
+      return context.json(
+        {
+          error: `No grant: an administrator has not allowed ${botId} to use ${connectionId}.`,
+        },
+        403,
+      );
+    }
+    const key = await vault.secretOf(connectionId);
+    if (!key)
+      return context.json({ error: "The connection has no secret." }, 503);
+    const subPath = new URL(context.req.url).pathname.replace(
+      new RegExp(`^.*/egress/conn/${botId}/${connectionId}`),
+      "",
+    );
+    const headers = new Headers();
+    for (const name of ["content-type", "accept"]) {
+      const value = context.req.header(name);
+      if (value) headers.set(name, value);
+    }
+    headers.set("authorization", `Bearer ${key}`);
+    let upstream: Response;
+    try {
+      upstream = await doFetch(
+        `${connection.baseUrl.replace(/\/$/, "")}${subPath}`,
+        {
+          method: context.req.method,
+          headers,
+          body:
+            context.req.method === "GET" || context.req.method === "HEAD"
+              ? undefined
+              : await context.req.arrayBuffer(),
+          signal: AbortSignal.timeout(120_000),
+        },
+      );
+    } catch (error) {
+      return context.json(
+        {
+          error: `The service could not be reached: ${error instanceof Error ? error.message : String(error)}`,
+        },
+        502,
+      );
+    }
+    const responseHeaders = new Headers();
+    for (const name of ["content-type", "cache-control"]) {
+      const value = upstream.headers.get(name);
+      if (value) responseHeaders.set(name, value);
+    }
+    return new Response(upstream.body, {
+      status: upstream.status,
+      headers: responseHeaders,
+    });
+  });
 
   app.all("/egress/:providerId/*", async (context) => {
     const offered =

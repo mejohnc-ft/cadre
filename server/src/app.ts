@@ -37,6 +37,8 @@ import type { PolicyStore } from "./computer/policy-store";
 import type { ComputerProvider } from "./computer/provider";
 import { createComputerRoutes } from "./computer/routes";
 import { configuredAuthProviders, type DeploymentConfig } from "./config";
+import { createConnectionRoutes } from "./connections/routes";
+import type { ConnectionStore } from "./connections/store";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
 import type { Database } from "./db/client";
 import { createEgressRoutes } from "./egress/routes";
@@ -187,6 +189,8 @@ export function createApp(
   providers?: { store: ProviderStore; database: Database },
   /** Triggers: runs that start themselves. */
   triggerEngine?: TriggerEngine,
+  /** The connections vault: workflow credentials, granted per coworker. */
+  connections?: ConnectionStore,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -700,6 +704,7 @@ export function createApp(
       createEgressRoutes({
         providers: providers.store,
         computerToken: harness.computerToken,
+        ...(connections ? { connections } : {}),
       }),
     );
   }
@@ -708,6 +713,13 @@ export function createApp(
     app.route(
       "/api",
       createTriggerRoutes({ engine: triggerEngine, requireUser }),
+    );
+  }
+
+  if (connections) {
+    app.route(
+      "/api",
+      createConnectionRoutes({ store: connections, requireUser }),
     );
   }
 

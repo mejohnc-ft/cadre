@@ -28,6 +28,7 @@ export default defineConfig({
     "./src/db/schema/artifacts.ts",
     "./src/db/schema/providers.ts",
     "./src/db/schema/triggers.ts",
+    "./src/db/schema/connections.ts",
   ],
   out: "./drizzle",
   dbCredentials: {

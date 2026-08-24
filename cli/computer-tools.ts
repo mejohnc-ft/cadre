@@ -101,6 +101,29 @@ const TOOLS: Array<ToolDefinition & { route: Route }> = [
     route: { method: "POST", path: "/click" },
   },
   {
+    name: "computer_type_secret",
+    description:
+      "Type a stored credential into a field without ever seeing it. Name a connection from the " +
+      "vault this coworker has been granted, which of its values to type (password, username, or " +
+      "the current totp code), and the ref of the field from your most recent snapshot. The server " +
+      "types the value directly; you learn only that it was delivered. Use computer_type for the " +
+      "username when the connection stores one openly, and this tool for everything secret.",
+    parameters: schema(
+      {
+        ref: string("Ref of the field, from your most recent snapshot"),
+        snapshotId: number("The snapshotId that ref came from"),
+        connection: string('The connection id, like "hover"'),
+        field: {
+          type: "string",
+          enum: ["password", "username", "totp"],
+          description: "Which of the connection's values to type",
+        },
+      },
+      ["ref", "snapshotId", "connection", "field"],
+    ),
+    route: { method: "POST", path: "/type_secret" },
+  },
+  {
     name: "computer_key",
     description:
       "Press a key, such as Enter, Tab or Escape. Give a ref to press it while a particular field " +
@@ -208,6 +231,8 @@ export function describeCall(name: string, args: Record<string, unknown>) {
       return `click ${args.ref}`;
     case "computer_type":
       return `type into ${args.ref}`;
+    case "computer_type_secret":
+      return `type the ${args.field} of ${args.connection} into ${args.ref}`;
     case "computer_key":
       return `press ${args.key}`;
     case "computer_scroll":

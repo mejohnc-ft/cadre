@@ -22,6 +22,7 @@ import { Route as AuthedAdminArtifactsRouteImport } from './routes/_authed/admin
 import { Route as AuthedAdminAuditRouteImport } from './routes/_authed/admin/audit'
 import { Route as AuthedAdminBoundariesRouteImport } from './routes/_authed/admin/boundaries'
 import { Route as AuthedAdminComputersRouteImport } from './routes/_authed/admin/computers'
+import { Route as AuthedAdminConnectionsRouteImport } from './routes/_authed/admin/connections'
 import { Route as AuthedAdminCredentialsRouteImport } from './routes/_authed/admin/credentials'
 import { Route as AuthedAdminIdentityProvidersRouteImport } from './routes/_authed/admin/identity-providers'
 import { Route as AuthedAdminModelsRouteImport } from './routes/_authed/admin/models'
@@ -105,6 +106,11 @@ const AuthedAdminBoundariesRoute = AuthedAdminBoundariesRouteImport.update({
 const AuthedAdminComputersRoute = AuthedAdminComputersRouteImport.update({
   id: '/computers',
   path: '/computers',
+  getParentRoute: () => AuthedAdminRouteRoute,
+} as any)
+const AuthedAdminConnectionsRoute = AuthedAdminConnectionsRouteImport.update({
+  id: '/connections',
+  path: '/connections',
   getParentRoute: () => AuthedAdminRouteRoute,
 } as any)
 const AuthedAdminCredentialsRoute = AuthedAdminCredentialsRouteImport.update({
@@ -233,6 +239,7 @@ export interface FileRoutesByFullPath {
   '/admin/audit': typeof AuthedAdminAuditRoute
   '/admin/boundaries': typeof AuthedAdminBoundariesRoute
   '/admin/computers': typeof AuthedAdminComputersRoute
+  '/admin/connections': typeof AuthedAdminConnectionsRoute
   '/admin/credentials': typeof AuthedAdminCredentialsRoute
   '/admin/identity-providers': typeof AuthedAdminIdentityProvidersRoute
   '/admin/models': typeof AuthedAdminModelsRoute
@@ -265,6 +272,7 @@ export interface FileRoutesByTo {
   '/admin/audit': typeof AuthedAdminAuditRoute
   '/admin/boundaries': typeof AuthedAdminBoundariesRoute
   '/admin/computers': typeof AuthedAdminComputersRoute
+  '/admin/connections': typeof AuthedAdminConnectionsRoute
   '/admin/credentials': typeof AuthedAdminCredentialsRoute
   '/admin/identity-providers': typeof AuthedAdminIdentityProvidersRoute
   '/admin/models': typeof AuthedAdminModelsRoute
@@ -301,6 +309,7 @@ export interface FileRoutesById {
   '/_authed/admin/audit': typeof AuthedAdminAuditRoute
   '/_authed/admin/boundaries': typeof AuthedAdminBoundariesRoute
   '/_authed/admin/computers': typeof AuthedAdminComputersRoute
+  '/_authed/admin/connections': typeof AuthedAdminConnectionsRoute
   '/_authed/admin/credentials': typeof AuthedAdminCredentialsRoute
   '/_authed/admin/identity-providers': typeof AuthedAdminIdentityProvidersRoute
   '/_authed/admin/models': typeof AuthedAdminModelsRoute
@@ -338,6 +347,7 @@ export interface FileRouteTypes {
     | '/admin/audit'
     | '/admin/boundaries'
     | '/admin/computers'
+    | '/admin/connections'
     | '/admin/credentials'
     | '/admin/identity-providers'
     | '/admin/models'
@@ -370,6 +380,7 @@ export interface FileRouteTypes {
     | '/admin/audit'
     | '/admin/boundaries'
     | '/admin/computers'
+    | '/admin/connections'
     | '/admin/credentials'
     | '/admin/identity-providers'
     | '/admin/models'
@@ -405,6 +416,7 @@ export interface FileRouteTypes {
     | '/_authed/admin/audit'
     | '/_authed/admin/boundaries'
     | '/_authed/admin/computers'
+    | '/_authed/admin/connections'
     | '/_authed/admin/credentials'
     | '/_authed/admin/identity-providers'
     | '/_authed/admin/models'
@@ -526,6 +538,13 @@ declare module '@tanstack/react-router' {
       path: '/computers'
       fullPath: '/admin/computers'
       preLoaderRoute: typeof AuthedAdminComputersRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
+    '/_authed/admin/connections': {
+      id: '/_authed/admin/connections'
+      path: '/connections'
+      fullPath: '/admin/connections'
+      preLoaderRoute: typeof AuthedAdminConnectionsRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
     }
     '/_authed/admin/credentials': {
@@ -683,6 +702,7 @@ interface AuthedAdminRouteRouteChildren {
   AuthedAdminAuditRoute: typeof AuthedAdminAuditRoute
   AuthedAdminBoundariesRoute: typeof AuthedAdminBoundariesRoute
   AuthedAdminComputersRoute: typeof AuthedAdminComputersRoute
+  AuthedAdminConnectionsRoute: typeof AuthedAdminConnectionsRoute
   AuthedAdminCredentialsRoute: typeof AuthedAdminCredentialsRoute
   AuthedAdminIdentityProvidersRoute: typeof AuthedAdminIdentityProvidersRoute
   AuthedAdminModelsRoute: typeof AuthedAdminModelsRoute
@@ -704,6 +724,7 @@ const AuthedAdminRouteRouteChildren: AuthedAdminRouteRouteChildren = {
   AuthedAdminAuditRoute: AuthedAdminAuditRoute,
   AuthedAdminBoundariesRoute: AuthedAdminBoundariesRoute,
   AuthedAdminComputersRoute: AuthedAdminComputersRoute,
+  AuthedAdminConnectionsRoute: AuthedAdminConnectionsRoute,
   AuthedAdminCredentialsRoute: AuthedAdminCredentialsRoute,
   AuthedAdminIdentityProvidersRoute: AuthedAdminIdentityProvidersRoute,
   AuthedAdminModelsRoute: AuthedAdminModelsRoute,

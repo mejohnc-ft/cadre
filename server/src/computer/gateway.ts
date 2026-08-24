@@ -18,6 +18,7 @@
  * The refs are opaque to the caller precisely so that the server holds the mapping.
  */
 import { type AuditStore, recordAuditEvent } from "../audit";
+import { totpCode } from "../connections/totp";
 import {
   ComputerUnavailableError,
   createComputerTransport,
@@ -65,6 +66,7 @@ import type {
   SnapshotElement,
   SnapshotResult,
   TypeInput,
+  TypeSecretInput,
   WriteFileInput,
   WriteFileResult,
 } from "./schema";
@@ -112,6 +114,16 @@ export type ComputerGatewayOptions = {
    * is correct in one process and is what a unit test wants. See snapshot-store.ts.
    */
   snapshots?: SnapshotStore;
+  /**
+   * The connections vault, for `computer_type_secret`. Absent, the verb refuses: a deployment
+   * that has no vault has nothing a Bot could ask to have typed.
+   */
+  connections?: {
+    allowed(connectionId: string, agentId: string): Promise<boolean>;
+    get(connectionId: string): Promise<{ username: string | null } | null>;
+    secretOf(connectionId: string): Promise<string | null>;
+    totpSeedOf(connectionId: string): Promise<string | null>;
+  };
 };
 
 export interface ComputerGateway {
@@ -138,6 +150,11 @@ export interface ComputerGateway {
     input: TypeInput,
     signal?: AbortSignal,
   ): Promise<ActionResult>;
+  typeSecret(
+    botId: string,
+    actor: ActionActor,
+    input: TypeSecretInput,
+  ): Promise<SecretResult>;
   key(
     botId: string,
     actor: ActionActor,
@@ -781,6 +798,67 @@ export function createComputerGateway(
       );
     },
 
+    /**
+     * A vault secret, typed by the server so the Bot never holds it.
+     *
+     * Governed like any typing action, then delivered over the same two-step channel a person
+     * uses: the field is named to the computer, and the value follows. The grant is checked here,
+     * at the moment of use — an administrator's revocation takes effect on the very next call.
+     */
+    typeSecret(botId: string, actor: ActionActor, input: TypeSecretInput) {
+      return govern(
+        "computer_type_secret",
+        botId,
+        actor,
+        { ref: input.ref, snapshotId: input.snapshotId },
+        async () => {
+          const vault = options.connections;
+          if (!vault) {
+            throw new ActionRefusedError(
+              "This deployment has no connections vault.",
+              null,
+            );
+          }
+          const allowed = await vault.allowed(input.connection, botId);
+          if (!allowed) {
+            throw new ActionRefusedError(
+              `This coworker has no grant for the connection "${input.connection}". An administrator can add one on the Connections page.`,
+              null,
+            );
+          }
+          let value: string | null = null;
+          if (input.field === "password") {
+            value = await vault.secretOf(input.connection);
+          } else if (input.field === "username") {
+            value = (await vault.get(input.connection))?.username ?? null;
+          } else if (input.field === "totp") {
+            const seed = await vault.totpSeedOf(input.connection);
+            value = seed ? await totpCode(seed) : null;
+          }
+          if (!value) {
+            throw new ActionRefusedError(
+              `The connection "${input.connection}" holds no ${input.field}.`,
+              null,
+            );
+          }
+          await post<ControlState>(botId, "/control/secret", {
+            label: `${input.connection} ${input.field}`,
+            ref: input.ref,
+            snapshotId: input.snapshotId,
+          });
+          const result = await post<SecretResult>(botId, "/human/secret", {
+            text: value,
+          });
+          await writeControlEvent(auditStore, "connection.secret_typed", {
+            botId,
+            actor,
+            reason: `${input.connection} ${input.field}, ${result.characters} characters into ${input.ref}`,
+          });
+          return result;
+        },
+      );
+    },
+
     key(
       botId: string,
       actor: ActionActor,
@@ -946,6 +1024,9 @@ function intentOf(
     // keypress does is press whatever the form activates, whichever tool asked for it.
     case "computer_type":
       return key && ACTIVATING_KEYS.has(key) ? "activate" : "type";
+    // A secret goes into a field and nothing is pressed afterwards; it is a typing action to a rule.
+    case "computer_type_secret":
+      return "type";
     case "computer_navigate":
       return "navigate";
     case "computer_read":
@@ -1074,7 +1155,8 @@ async function writeControlEvent(
     | "computer.secret_requested"
     | "computer.secret_supplied"
     | "computer.stopped"
-    | "computer.reset",
+    | "computer.reset"
+    | "connection.secret_typed",
   entry: {
     botId: string;
     actor: ActionActor;
