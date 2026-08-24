@@ -4,6 +4,7 @@ import { type ReactNode, useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { AgentFields } from "@/components/agents/agent-fields";
 import { CallbackTokenPanel } from "@/components/agents/callback-token-panel";
+import { ProfileControlPlane } from "@/components/agents/profile-control-plane";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -142,6 +143,13 @@ export function AgentProfile({ agentId }: { agentId: string }) {
           </p>
         </section>
       )}
+
+      {!isEditing && profile.canManage ? (
+        <ProfileControlPlane
+          agentId={agentId}
+          harness={profile.harness ?? null}
+        />
+      ) : null}
 
       {/*
        * Only for a coworker that runs somewhere else, and only for somebody who may change it.

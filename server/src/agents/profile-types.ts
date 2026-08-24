@@ -18,6 +18,8 @@ export type AgentProfile = {
   deletedAt: Date | null;
   /** Where this coworker runs. Null for the Bot in the box. */
   endpoint: string | null;
+  /** The managed harness this coworker runs, when it is a harness coworker. */
+  harness?: string | null;
   /** Whether a key is set for it. Never the key. */
   hasAuth: boolean;
   /**

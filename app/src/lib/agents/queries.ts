@@ -18,6 +18,7 @@ export type AgentProfile = {
   visibility: AgentVisibility;
   /** Where this coworker runs. Null for the Bot in the box. */
   endpoint: string | null;
+  harness: string | null;
   /** Whether a key is set for it. Never the key itself. */
   hasAuth: boolean;
   /**

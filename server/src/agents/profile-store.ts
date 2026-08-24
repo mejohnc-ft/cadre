@@ -163,6 +163,7 @@ function mapProfile(
     hidden: row.hiddenAt !== null,
     deletedAt: row.deletedAt,
     endpoint: endpointOf(row.configuration),
+    harness: harnessOf(row.configuration),
     // Whether a key is set, never which. The form needs to show "a key is set" so a person does not
     // wipe one by saving an unrelated edit; showing the value would put a secret in a screenshot.
     hasAuth: authFromConfiguration(row.configuration) !== null,
@@ -177,6 +178,12 @@ function mapProfile(
  * convert an external agent back into the built-in one. That failure is silent and total: the Bot
  * keeps working, so nothing looks broken, and it is simply no longer their agent.
  */
+function harnessOf(configuration: unknown): string | null {
+  if (!configuration || typeof configuration !== "object") return null;
+  const harness = (configuration as { harness?: unknown }).harness;
+  return typeof harness === "string" && harness ? harness : null;
+}
+
 function endpointOf(configuration: unknown): string | null {
   if (!configuration || typeof configuration !== "object") return null;
   const endpoint = (configuration as { endpoint?: unknown }).endpoint;

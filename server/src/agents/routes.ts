@@ -453,6 +453,7 @@ function agentDto(actor: AgentActor, agent: AgentProfile) {
     // Published so the edit form can show it. Safe to expose: it is an address the person supplied,
     // and any credential for it lives in the vault, never in this row.
     endpoint: agent.endpoint,
+    harness: agent.harness ?? null,
     hasAuth: agent.hasAuth,
     // Whether one exists, never what it is.
     hasCallbackToken: agent.hasCallbackToken,

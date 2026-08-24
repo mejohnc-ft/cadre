@@ -18,14 +18,17 @@ import { Route as AuthedAppIndexRouteImport } from './routes/_authed/_app/index'
 import { Route as AuthedAppBotRouteImport } from './routes/_authed/_app/bot'
 import { Route as AuthedAppSkillsRouteImport } from './routes/_authed/_app/skills'
 import { Route as AuthedAdminIndexRouteImport } from './routes/_authed/admin/index'
+import { Route as AuthedAdminArtifactsRouteImport } from './routes/_authed/admin/artifacts'
 import { Route as AuthedAdminAuditRouteImport } from './routes/_authed/admin/audit'
 import { Route as AuthedAdminBoundariesRouteImport } from './routes/_authed/admin/boundaries'
 import { Route as AuthedAdminComputersRouteImport } from './routes/_authed/admin/computers'
 import { Route as AuthedAdminCredentialsRouteImport } from './routes/_authed/admin/credentials'
 import { Route as AuthedAdminIdentityProvidersRouteImport } from './routes/_authed/admin/identity-providers'
+import { Route as AuthedAdminModelsRouteImport } from './routes/_authed/admin/models'
 import { Route as AuthedAdminPeopleRouteImport } from './routes/_authed/admin/people'
 import { Route as AuthedAdminPlaygroundRouteImport } from './routes/_authed/admin/playground'
 import { Route as AuthedAdminSkillsRouteImport } from './routes/_authed/admin/skills'
+import { Route as AuthedAdminUsageRouteImport } from './routes/_authed/admin/usage'
 import { Route as AuthedSettingsIndexRouteImport } from './routes/_authed/settings/index'
 import { Route as AuthedAppAgentsIndexRouteImport } from './routes/_authed/_app/agents/index'
 import { Route as AuthedAppChannelChannelIdRouteImport } from './routes/_authed/_app/channel/$channelId'
@@ -83,6 +86,11 @@ const AuthedAdminIndexRoute = AuthedAdminIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AuthedAdminRouteRoute,
 } as any)
+const AuthedAdminArtifactsRoute = AuthedAdminArtifactsRouteImport.update({
+  id: '/artifacts',
+  path: '/artifacts',
+  getParentRoute: () => AuthedAdminRouteRoute,
+} as any)
 const AuthedAdminAuditRoute = AuthedAdminAuditRouteImport.update({
   id: '/audit',
   path: '/audit',
@@ -109,6 +117,11 @@ const AuthedAdminIdentityProvidersRoute =
     path: '/identity-providers',
     getParentRoute: () => AuthedAdminRouteRoute,
   } as any)
+const AuthedAdminModelsRoute = AuthedAdminModelsRouteImport.update({
+  id: '/models',
+  path: '/models',
+  getParentRoute: () => AuthedAdminRouteRoute,
+} as any)
 const AuthedAdminPeopleRoute = AuthedAdminPeopleRouteImport.update({
   id: '/people',
   path: '/people',
@@ -122,6 +135,11 @@ const AuthedAdminPlaygroundRoute = AuthedAdminPlaygroundRouteImport.update({
 const AuthedAdminSkillsRoute = AuthedAdminSkillsRouteImport.update({
   id: '/skills',
   path: '/skills',
+  getParentRoute: () => AuthedAdminRouteRoute,
+} as any)
+const AuthedAdminUsageRoute = AuthedAdminUsageRouteImport.update({
+  id: '/usage',
+  path: '/usage',
   getParentRoute: () => AuthedAdminRouteRoute,
 } as any)
 const AuthedSettingsIndexRoute = AuthedSettingsIndexRouteImport.update({
@@ -205,14 +223,17 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AuthedSettingsRouteRouteWithChildren
   '/bot': typeof AuthedAppBotRoute
   '/skills': typeof AuthedAppSkillsRoute
+  '/admin/artifacts': typeof AuthedAdminArtifactsRoute
   '/admin/audit': typeof AuthedAdminAuditRoute
   '/admin/boundaries': typeof AuthedAdminBoundariesRoute
   '/admin/computers': typeof AuthedAdminComputersRoute
   '/admin/credentials': typeof AuthedAdminCredentialsRoute
   '/admin/identity-providers': typeof AuthedAdminIdentityProvidersRoute
+  '/admin/models': typeof AuthedAdminModelsRoute
   '/admin/people': typeof AuthedAdminPeopleRoute
   '/admin/playground': typeof AuthedAdminPlaygroundRoute
   '/admin/skills': typeof AuthedAdminSkillsRoute
+  '/admin/usage': typeof AuthedAdminUsageRoute
   '/admin/': typeof AuthedAdminIndexRoute
   '/settings/': typeof AuthedSettingsIndexRoute
   '/channel/$channelId': typeof AuthedAppChannelChannelIdRoute
@@ -233,14 +254,17 @@ export interface FileRoutesByTo {
   '/sign': typeof SignRoute
   '/bot': typeof AuthedAppBotRoute
   '/skills': typeof AuthedAppSkillsRoute
+  '/admin/artifacts': typeof AuthedAdminArtifactsRoute
   '/admin/audit': typeof AuthedAdminAuditRoute
   '/admin/boundaries': typeof AuthedAdminBoundariesRoute
   '/admin/computers': typeof AuthedAdminComputersRoute
   '/admin/credentials': typeof AuthedAdminCredentialsRoute
   '/admin/identity-providers': typeof AuthedAdminIdentityProvidersRoute
+  '/admin/models': typeof AuthedAdminModelsRoute
   '/admin/people': typeof AuthedAdminPeopleRoute
   '/admin/playground': typeof AuthedAdminPlaygroundRoute
   '/admin/skills': typeof AuthedAdminSkillsRoute
+  '/admin/usage': typeof AuthedAdminUsageRoute
   '/admin': typeof AuthedAdminIndexRoute
   '/settings': typeof AuthedSettingsIndexRoute
   '/channel/$channelId': typeof AuthedAppChannelChannelIdRoute
@@ -265,14 +289,17 @@ export interface FileRoutesById {
   '/_authed/_app': typeof AuthedAppRouteWithChildren
   '/_authed/_app/bot': typeof AuthedAppBotRoute
   '/_authed/_app/skills': typeof AuthedAppSkillsRoute
+  '/_authed/admin/artifacts': typeof AuthedAdminArtifactsRoute
   '/_authed/admin/audit': typeof AuthedAdminAuditRoute
   '/_authed/admin/boundaries': typeof AuthedAdminBoundariesRoute
   '/_authed/admin/computers': typeof AuthedAdminComputersRoute
   '/_authed/admin/credentials': typeof AuthedAdminCredentialsRoute
   '/_authed/admin/identity-providers': typeof AuthedAdminIdentityProvidersRoute
+  '/_authed/admin/models': typeof AuthedAdminModelsRoute
   '/_authed/admin/people': typeof AuthedAdminPeopleRoute
   '/_authed/admin/playground': typeof AuthedAdminPlaygroundRoute
   '/_authed/admin/skills': typeof AuthedAdminSkillsRoute
+  '/_authed/admin/usage': typeof AuthedAdminUsageRoute
   '/_authed/_app/': typeof AuthedAppIndexRoute
   '/_authed/admin/': typeof AuthedAdminIndexRoute
   '/_authed/settings/': typeof AuthedSettingsIndexRoute
@@ -298,14 +325,17 @@ export interface FileRouteTypes {
     | '/settings'
     | '/bot'
     | '/skills'
+    | '/admin/artifacts'
     | '/admin/audit'
     | '/admin/boundaries'
     | '/admin/computers'
     | '/admin/credentials'
     | '/admin/identity-providers'
+    | '/admin/models'
     | '/admin/people'
     | '/admin/playground'
     | '/admin/skills'
+    | '/admin/usage'
     | '/admin/'
     | '/settings/'
     | '/channel/$channelId'
@@ -326,14 +356,17 @@ export interface FileRouteTypes {
     | '/sign'
     | '/bot'
     | '/skills'
+    | '/admin/artifacts'
     | '/admin/audit'
     | '/admin/boundaries'
     | '/admin/computers'
     | '/admin/credentials'
     | '/admin/identity-providers'
+    | '/admin/models'
     | '/admin/people'
     | '/admin/playground'
     | '/admin/skills'
+    | '/admin/usage'
     | '/admin'
     | '/settings'
     | '/channel/$channelId'
@@ -357,14 +390,17 @@ export interface FileRouteTypes {
     | '/_authed/_app'
     | '/_authed/_app/bot'
     | '/_authed/_app/skills'
+    | '/_authed/admin/artifacts'
     | '/_authed/admin/audit'
     | '/_authed/admin/boundaries'
     | '/_authed/admin/computers'
     | '/_authed/admin/credentials'
     | '/_authed/admin/identity-providers'
+    | '/_authed/admin/models'
     | '/_authed/admin/people'
     | '/_authed/admin/playground'
     | '/_authed/admin/skills'
+    | '/_authed/admin/usage'
     | '/_authed/_app/'
     | '/_authed/admin/'
     | '/_authed/settings/'
@@ -452,6 +488,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAdminIndexRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
     }
+    '/_authed/admin/artifacts': {
+      id: '/_authed/admin/artifacts'
+      path: '/artifacts'
+      fullPath: '/admin/artifacts'
+      preLoaderRoute: typeof AuthedAdminArtifactsRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
     '/_authed/admin/audit': {
       id: '/_authed/admin/audit'
       path: '/audit'
@@ -487,6 +530,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAdminIdentityProvidersRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
     }
+    '/_authed/admin/models': {
+      id: '/_authed/admin/models'
+      path: '/models'
+      fullPath: '/admin/models'
+      preLoaderRoute: typeof AuthedAdminModelsRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
     '/_authed/admin/people': {
       id: '/_authed/admin/people'
       path: '/people'
@@ -506,6 +556,13 @@ declare module '@tanstack/react-router' {
       path: '/skills'
       fullPath: '/admin/skills'
       preLoaderRoute: typeof AuthedAdminSkillsRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
+    '/_authed/admin/usage': {
+      id: '/_authed/admin/usage'
+      path: '/usage'
+      fullPath: '/admin/usage'
+      preLoaderRoute: typeof AuthedAdminUsageRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
     }
     '/_authed/settings/': {
@@ -603,14 +660,17 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthedAdminRouteRouteChildren {
+  AuthedAdminArtifactsRoute: typeof AuthedAdminArtifactsRoute
   AuthedAdminAuditRoute: typeof AuthedAdminAuditRoute
   AuthedAdminBoundariesRoute: typeof AuthedAdminBoundariesRoute
   AuthedAdminComputersRoute: typeof AuthedAdminComputersRoute
   AuthedAdminCredentialsRoute: typeof AuthedAdminCredentialsRoute
   AuthedAdminIdentityProvidersRoute: typeof AuthedAdminIdentityProvidersRoute
+  AuthedAdminModelsRoute: typeof AuthedAdminModelsRoute
   AuthedAdminPeopleRoute: typeof AuthedAdminPeopleRoute
   AuthedAdminPlaygroundRoute: typeof AuthedAdminPlaygroundRoute
   AuthedAdminSkillsRoute: typeof AuthedAdminSkillsRoute
+  AuthedAdminUsageRoute: typeof AuthedAdminUsageRoute
   AuthedAdminIndexRoute: typeof AuthedAdminIndexRoute
   AuthedAdminComponentsNameRoute: typeof AuthedAdminComponentsNameRoute
   AuthedAdminPluginsKeyRoute: typeof AuthedAdminPluginsKeyRoute
@@ -620,14 +680,17 @@ interface AuthedAdminRouteRouteChildren {
 }
 
 const AuthedAdminRouteRouteChildren: AuthedAdminRouteRouteChildren = {
+  AuthedAdminArtifactsRoute: AuthedAdminArtifactsRoute,
   AuthedAdminAuditRoute: AuthedAdminAuditRoute,
   AuthedAdminBoundariesRoute: AuthedAdminBoundariesRoute,
   AuthedAdminComputersRoute: AuthedAdminComputersRoute,
   AuthedAdminCredentialsRoute: AuthedAdminCredentialsRoute,
   AuthedAdminIdentityProvidersRoute: AuthedAdminIdentityProvidersRoute,
+  AuthedAdminModelsRoute: AuthedAdminModelsRoute,
   AuthedAdminPeopleRoute: AuthedAdminPeopleRoute,
   AuthedAdminPlaygroundRoute: AuthedAdminPlaygroundRoute,
   AuthedAdminSkillsRoute: AuthedAdminSkillsRoute,
+  AuthedAdminUsageRoute: AuthedAdminUsageRoute,
   AuthedAdminIndexRoute: AuthedAdminIndexRoute,
   AuthedAdminComponentsNameRoute: AuthedAdminComponentsNameRoute,
   AuthedAdminPluginsKeyRoute: AuthedAdminPluginsKeyRoute,
