@@ -89,6 +89,8 @@ export const auditEventTypes = [
   "node.enrolled",
   "node.removed",
   "computer.moved",
+  /* A trigger fired: a run started itself, by schedule, webhook or hand. */
+  "trigger.fired",
   /*
    * A call this deployment permitted and the vendor did not complete.
    *

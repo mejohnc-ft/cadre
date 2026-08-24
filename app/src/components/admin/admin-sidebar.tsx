@@ -2,8 +2,9 @@ import {
   IconArrowLeft,
   IconBuildingBank,
   IconChartBar,
-  IconCpu,
+  IconClock,
   IconCode,
+  IconCpu,
   IconDeviceDesktop,
   IconFileText,
   IconKey,
@@ -83,6 +84,11 @@ const GROUPS: {
         title: "Artifacts",
         icon: IconPackage,
         linkOptions: { to: "/admin/artifacts" },
+      },
+      {
+        title: "Triggers",
+        icon: IconClock,
+        linkOptions: { to: "/admin/triggers" },
       },
       {
         title: "Model Routing",

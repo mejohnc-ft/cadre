@@ -3,6 +3,7 @@ import { mintRunAssertion } from "./agents/callback-token";
 import { createAgentProfileStore } from "./agents/profile-store";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
 import { createApp } from "./app";
+import { createArtifactStore } from "./artifacts/store";
 import { createAuditReader, createAuditStore, recordAuditEvent } from "./audit";
 import { startAuditRetention } from "./audit-retention";
 import { createAuth } from "./auth";
@@ -31,13 +32,8 @@ import {
   describeComputerIsolation,
 } from "./computer/provider";
 import { createSnapshotStore } from "./computer/snapshot-store";
-import { bindAddresses, loadConfig } from "./config";
-import { createMeshProvider } from "./mesh/provider";
-import { createNodeStore, createPlacementStore } from "./mesh/store";
 import type { SupervisorProvider } from "./computer/supervisor";
-import { createArtifactStore } from "./artifacts/store";
-import { createProviderStore } from "./providers/store";
-import { PostgresAgentRunner } from "./runtime/postgres-runner";
+import { bindAddresses, loadConfig } from "./config";
 import {
   actorForAgent,
   type IdentifyActor,
@@ -50,16 +46,21 @@ import {
   resolveModelApiKey,
 } from "./credentials";
 import { createDatabase } from "./db/client";
+import { createMeshProvider } from "./mesh/provider";
+import { createNodeStore, createPlacementStore } from "./mesh/store";
 import { createPeopleStore } from "./people/store";
 import { createPluginStore } from "./plugins/store";
 import { grantedSkills, grantedTools } from "./plugins/tools";
+import { createProviderStore } from "./providers/store";
 import { createIntentRouter } from "./routing/classify";
 import { createModelCompleter } from "./routing/model";
+import { PostgresAgentRunner } from "./runtime/postgres-runner";
 import {
   createPackageStatusReader,
   loadTenantPackage,
   synchronizeTenantPackage,
 } from "./tenant-package";
+import { createTriggerEngine } from "./triggers/engine";
 
 /**
  * Who is asking, for a CopilotKit request.
@@ -218,6 +219,15 @@ const localProvider = config.computer
  */
 const nodeStore = createNodeStore(database, config.keyEncryptionKey);
 const artifactStore = createArtifactStore(database);
+/*
+ * Triggers fire through this server's own run endpoint on loopback: the engine is one more
+ * surface. The scheduler starts after the server is listening.
+ */
+const triggerEngine = createTriggerEngine({
+  database,
+  audit: createAuditStore(database),
+  selfUrl: `http://127.0.0.1:${Number.parseInt(process.env.PORT ?? "3001", 10)}`,
+});
 const providerStore = createProviderStore(database, config.keyEncryptionKey);
 /*
  * Seed providers from the environment the first time. A deployment configured before providers
@@ -660,6 +670,7 @@ const app = createApp(
   },
   artifactStore,
   { store: providerStore, database },
+  triggerEngine,
 );
 
 /**
@@ -815,6 +826,8 @@ const serverOptions: Parameters<typeof serve<SocketData>>[0] = {
 for (const hostname of hostnames) {
   serve<SocketData>({ ...serverOptions, hostname });
 }
+
+triggerEngine.start();
 
 if (config.singleUser) {
   // Loud, every boot. A server that is not checking who is asking should never be a quiet default.

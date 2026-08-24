@@ -134,6 +134,13 @@
       "when": 1787530248033,
       "tag": "0018_providers",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1787539742002,
+      "tag": "0019_triggers",
+      "breakpoints": true
     }
   ]
 }

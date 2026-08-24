@@ -5,8 +5,8 @@ import { authoriseAgentCall } from "./agents/callback-token";
 import type { BotAccessCheck } from "./agents/profile-policy";
 import type { AgentProfileStore } from "./agents/profile-store";
 import { createAgentRoutes } from "./agents/routes";
-import { createRoutingRoutes } from "./routing/routes";
-import type { IntentRouter } from "./routing/classify";
+import { createArtifactRoutes } from "./artifacts/routes";
+import type { ArtifactStore } from "./artifacts/store";
 import {
   type AuditReader,
   type AuditStore,
@@ -27,33 +27,35 @@ import { type ChannelStore, createChannelRoutes } from "./channels/routes";
 import type { ThreadIdentity } from "./channels/thread-identity";
 import { createThreadRoutes } from "./channels/thread-routes";
 import { createThreadReader } from "./channels/thread-status";
-import type { ComputerProvider } from "./computer/provider";
-import type { ActionPolicy } from "./computer/policy";
-import { createArtifactRoutes } from "./artifacts/routes";
-import { createEgressRoutes } from "./egress/routes";
-import { createProviderRoutes } from "./providers/routes";
-import type { ProviderStore } from "./providers/store";
-import type { Database } from "./db/client";
-import type { ArtifactStore } from "./artifacts/store";
-import { createHarnessRoutes } from "./harness/routes";
-import type { MeshProvider } from "./mesh/provider";
-import { createMeshRoutes } from "./mesh/routes";
-import type { NodeStore } from "./mesh/store";
-import type { ThreadStore } from "./runtime/postgres-runner";
 import { createComponentRoutes } from "./components/routes";
 import type { SandboxedStore } from "./components/sandboxed";
 import { createSandboxedRoutes } from "./components/sandboxed-routes";
 import type { ComponentStore } from "./components/store";
 import type { ComputerGateway } from "./computer/gateway";
+import type { ActionPolicy } from "./computer/policy";
 import type { PolicyStore } from "./computer/policy-store";
+import type { ComputerProvider } from "./computer/provider";
 import { createComputerRoutes } from "./computer/routes";
 import { configuredAuthProviders, type DeploymentConfig } from "./config";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
+import type { Database } from "./db/client";
+import { createEgressRoutes } from "./egress/routes";
+import { createHarnessRoutes } from "./harness/routes";
+import type { MeshProvider } from "./mesh/provider";
+import { createMeshRoutes } from "./mesh/routes";
+import type { NodeStore } from "./mesh/store";
 import type { PeopleStore } from "./people/store";
 import { createPluginRoutes } from "./plugins/routes";
 import type { PluginStore } from "./plugins/store";
 import { REFUSAL_MARKER } from "./plugins/tools";
+import { createProviderRoutes } from "./providers/routes";
+import type { ProviderStore } from "./providers/store";
+import type { IntentRouter } from "./routing/classify";
+import { createRoutingRoutes } from "./routing/routes";
+import type { ThreadStore } from "./runtime/postgres-runner";
 import type { PackageStatusReader } from "./tenant-package";
+import type { TriggerEngine } from "./triggers/engine";
+import { createTriggerRoutes } from "./triggers/routes";
 
 /**
  * One row for something an administrator did to somebody's access.
@@ -183,6 +185,8 @@ export function createApp(
   artifactStore?: ArtifactStore,
   /** Providers and model routing. */
   providers?: { store: ProviderStore; database: Database },
+  /** Triggers: runs that start themselves. */
+  triggerEngine?: TriggerEngine,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -697,6 +701,13 @@ export function createApp(
         providers: providers.store,
         computerToken: harness.computerToken,
       }),
+    );
+  }
+
+  if (triggerEngine) {
+    app.route(
+      "/api",
+      createTriggerRoutes({ engine: triggerEngine, requireUser }),
     );
   }
 

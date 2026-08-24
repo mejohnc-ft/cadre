@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   type Adapter,
@@ -243,93 +243,152 @@ export function createHarness(options: HarnessOptions) {
           input.artifacts ?? [],
         );
 
-        const invocation = adapter.invoke({
-          prompt,
-          standing,
-          resume: sessionFor(input.threadId, adapter.id),
-          workspaceDir: options.workspaceDir,
-          stateDir,
-          hooks: {
-            claudeSettings: claudeSettingsFile(),
-            piExtension: "/opt/slice/pi-slice.mjs",
-            opencodeConfig: opencodeConfigFile(settings),
-          },
-          model: { id: settings.modelId, provider },
-        });
+        /*
+         * One engine run. A rebuilt computer keeps its workspace — where the thread-to-session map
+         * lives — but not its home directory, where the engines keep the sessions themselves. So a
+         * resumed run can point at a session that no longer exists, and every engine treats that as
+         * an immediate error. When a resumed run fails before doing any work, the caller forgets
+         * the session and runs fresh instead of surfacing the error.
+         */
+        const attempt = (resume: string | undefined) =>
+          new Promise<{ staleResume: boolean }>((resolve) => {
+            const invocation = adapter.invoke({
+              prompt,
+              standing,
+              resume,
+              workspaceDir: options.workspaceDir,
+              stateDir,
+              hooks: {
+                claudeSettings: claudeSettingsFile(),
+                piExtension: "/opt/slice/pi-slice.mjs",
+                opencodeConfig: opencodeConfigFile(settings),
+              },
+              model: { id: settings.modelId, provider },
+            });
 
-        const proc = Bun.spawn([adapter.binary, ...invocation.argv], {
-          cwd: options.workspaceDir,
-          env: {
-            ...process.env,
-            HOME: process.env.HOME ?? "/root",
-            SLICE_BOT_ID: botId,
-            SLICE_RUN_ID: input.runId,
-            SLICE_COMPUTER_TOKEN: options.computerToken,
-            ...(options.serverUrl
-              ? { SLICE_SERVER_URL: options.serverUrl }
-              : {}),
-            ...(harnessId === "opencode"
-              ? { OPENCODE_CONFIG: opencodeConfigFile(settings) }
-              : {}),
-            ...harnessModelEnv(harnessId, settings),
-            ...invocation.env,
-          },
-          stdin: "ignore",
-          stdout: "pipe",
-          stderr: "pipe",
-        });
+            const proc = Bun.spawn([adapter.binary, ...invocation.argv], {
+              cwd: options.workspaceDir,
+              env: {
+                ...process.env,
+                HOME: process.env.HOME ?? "/root",
+                SLICE_BOT_ID: botId,
+                SLICE_RUN_ID: input.runId,
+                SLICE_COMPUTER_TOKEN: options.computerToken,
+                ...(options.serverUrl
+                  ? { SLICE_SERVER_URL: options.serverUrl }
+                  : {}),
+                ...(harnessId === "opencode"
+                  ? { OPENCODE_CONFIG: opencodeConfigFile(settings) }
+                  : {}),
+                ...harnessModelEnv(harnessId, settings),
+                ...invocation.env,
+              },
+              stdin: "ignore",
+              stdout: "pipe",
+              stderr: "pipe",
+            });
 
-        let finished = false;
-        let buffer = "";
-        const decoder = new TextDecoder();
+            let finished = false;
+            let sawWork = false;
+            let buffer = "";
+            const decoder = new TextDecoder();
 
-        const onLine = (line: string) => {
-          if (
-            adapter.parse(line, stamped, (id) =>
-              remember(input.threadId, adapter.id, id),
-            )
-          ) {
-            finished = true;
+            /*
+             * Liveness: the engine's stdout proves it is working even when the adapter has nothing
+             * to say about a line — Claude Code streams thinking tokens the channel never sees.
+             * Without this, a long think reads as a stalled stream and the watchdog ends the turn.
+             */
+            let lastEmit = Date.now();
+            const emitting: Emit = (event) => {
+              if (resume && !sawWork && event.type === "RUN_ERROR") {
+                finished = true;
+                try {
+                  proc.kill();
+                } catch {}
+                resolve({ staleResume: true });
+                return;
+              }
+              if (
+                event.type === "TEXT_MESSAGE_CONTENT" ||
+                event.type === "TOOL_CALL_START"
+              ) {
+                sawWork = true;
+              }
+              lastEmit = Date.now();
+              stamped(event);
+            };
+            const onLine = (line: string) => {
+              if (
+                adapter.parse(line, emitting, (id) =>
+                  remember(input.threadId, adapter.id, id),
+                )
+              ) {
+                finished = true;
+              } else if (Date.now() - lastEmit > 15_000) {
+                emitting({ type: "CUSTOM", name: "harness_alive", value: {} });
+              }
+            };
+
+            let stderrTail = "";
+            const drainStderr = (async () => {
+              const reader = proc.stderr.getReader();
+              try {
+                for (;;) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  stderrTail = (stderrTail + decoder.decode(value)).slice(
+                    -4000,
+                  );
+                }
+              } catch {}
+            })();
+
+            (async () => {
+              const reader = proc.stdout.getReader();
+              try {
+                for (;;) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  buffer += decoder.decode(value, { stream: true });
+                  const lines = buffer.split("\n");
+                  buffer = lines.pop() ?? "";
+                  for (const line of lines) if (line.trim()) onLine(line);
+                }
+                if (buffer.trim()) onLine(buffer);
+              } catch {}
+              const code = await proc.exited;
+              await drainStderr;
+              if (!finished) {
+                if (resume && !sawWork) {
+                  resolve({ staleResume: true });
+                  return;
+                }
+                if (adapter.finishOnExit && code === 0) {
+                  stamped({ type: "RUN_FINISHED" });
+                } else {
+                  stamped({
+                    type: "RUN_ERROR",
+                    message: `The harness exited with code ${code}${stderrTail.trim() ? `: ${stderrTail.trim().slice(-400)}` : ""}.`,
+                  });
+                }
+              }
+              resolve({ staleResume: false });
+            })();
+          });
+
+        void (async () => {
+          const resume = sessionFor(input.threadId, adapter.id);
+          if (resume) {
+            const { staleResume } = await attempt(resume);
+            if (!staleResume) {
+              finish();
+              return;
+            }
+            try {
+              rmSync(join(sessionsDir, key(input.threadId, adapter.id)));
+            } catch {}
           }
-        };
-
-        let stderrTail = "";
-        const drainStderr = (async () => {
-          const reader = proc.stderr.getReader();
-          try {
-            for (;;) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              stderrTail = (stderrTail + decoder.decode(value)).slice(-4000);
-            }
-          } catch {}
-        })();
-
-        (async () => {
-          const reader = proc.stdout.getReader();
-          try {
-            for (;;) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              buffer += decoder.decode(value, { stream: true });
-              const lines = buffer.split("\n");
-              buffer = lines.pop() ?? "";
-              for (const line of lines) if (line.trim()) onLine(line);
-            }
-            if (buffer.trim()) onLine(buffer);
-          } catch {}
-          const code = await proc.exited;
-          await drainStderr;
-          if (!finished) {
-            if (adapter.finishOnExit && code === 0) {
-              stamped({ type: "RUN_FINISHED" });
-            } else {
-              stamped({
-                type: "RUN_ERROR",
-                message: `The harness exited with code ${code}${stderrTail.trim() ? `: ${stderrTail.trim().slice(-400)}` : ""}.`,
-              });
-            }
-          }
+          await attempt(undefined);
           finish();
         })();
       },
