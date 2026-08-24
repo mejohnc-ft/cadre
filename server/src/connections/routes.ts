@@ -1,6 +1,7 @@
 import { Hono, type MiddlewareHandler } from "hono";
 import type { AppVariables } from "../auth/guards";
 import { requireAdmin } from "../auth/guards";
+import { pollDeviceCode, startDeviceCode } from "./msauth";
 import {
   CONNECTION_KINDS,
   type ConnectionKind,
@@ -22,6 +23,12 @@ function isKind(value: unknown): value is ConnectionKind {
     (CONNECTION_KINDS as readonly string[]).includes(value)
   );
 }
+
+/** Device-code sign-ins in flight, keyed by connection id. Lives only in this process. */
+const pendingDeviceCodes = new Map<
+  string,
+  { deviceCode: string; tenant: string; clientId: string; expiresAt: number }
+>();
 
 export function createConnectionRoutes(input: {
   store: ConnectionStore;
@@ -224,6 +231,96 @@ export function createConnectionRoutes(input: {
       id: context.var.actor.id,
     });
     return context.json(outcome);
+  });
+
+  /**
+   * Microsoft device-code sign-in — start. Ensures the connection exists, asks Microsoft for a
+   * code, and returns the code + the URL the person opens in their OWN browser. Their password
+   * never comes here.
+   */
+  app.post(
+    "/admin/connections/:id/ms-connect/start",
+    admin,
+    async (context) => {
+      const denied = requireAdmin(context);
+      if (denied) return denied;
+      const id = context.req.param("id");
+      const body = (await context.req.json().catch(() => null)) as {
+        name?: unknown;
+        tenant?: unknown;
+        clientId?: unknown;
+      } | null;
+      // Create the connection on first connect, so the UI needs no prior setup.
+      const existing = await input.store.get(id);
+      if (!existing) {
+        await input.store.upsert({
+          id,
+          name: typeof body?.name === "string" ? body.name : id,
+          kind: "web",
+          service: "microsoft",
+          actor: context.var.actor.id,
+        });
+      }
+      try {
+        const started = await startDeviceCode({
+          ...(typeof body?.tenant === "string" ? { tenant: body.tenant } : {}),
+          ...(typeof body?.clientId === "string"
+            ? { clientId: body.clientId }
+            : {}),
+        });
+        pendingDeviceCodes.set(id, {
+          deviceCode: started.deviceCode,
+          tenant:
+            typeof body?.tenant === "string" ? body.tenant : "organizations",
+          clientId:
+            typeof body?.clientId === "string"
+              ? body.clientId
+              : "14d82eec-204b-4c2f-b7e8-296a70dab67e",
+          expiresAt: Date.now() + started.expiresIn * 1000,
+        });
+        return context.json({
+          userCode: started.userCode,
+          verificationUri: started.verificationUri,
+          expiresIn: started.expiresIn,
+          interval: started.interval,
+        });
+      } catch (error) {
+        return context.json(
+          { error: error instanceof Error ? error.message : String(error) },
+          502,
+        );
+      }
+    },
+  );
+
+  /** Microsoft device-code sign-in — poll. Captures the token once the person has signed in. */
+  app.post("/admin/connections/:id/ms-connect/poll", admin, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) return denied;
+    const id = context.req.param("id");
+    const state = pendingDeviceCodes.get(id);
+    if (!state) return context.json({ status: "no-pending" });
+    if (Date.now() > state.expiresAt) {
+      pendingDeviceCodes.delete(id);
+      return context.json({ status: "expired" });
+    }
+    try {
+      const tokens = await pollDeviceCode({
+        deviceCode: state.deviceCode,
+        tenant: state.tenant,
+        clientId: state.clientId,
+      });
+      if (!tokens) return context.json({ status: "pending" });
+      pendingDeviceCodes.delete(id);
+      await input.store.storeSession(id, JSON.stringify(tokens), null);
+      return context.json({ status: "connected" });
+    } catch (error) {
+      pendingDeviceCodes.delete(id);
+      return context.json({
+        status: "failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   });
 
   app.post("/admin/connections/:id/grants", admin, async (context) => {

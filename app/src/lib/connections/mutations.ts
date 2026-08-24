@@ -143,3 +143,47 @@ export function connectCaptureMutationOptions(queryClient: QueryClient) {
     onSettled: () => invalidate(queryClient),
   });
 }
+
+export function msConnectStartMutationOptions() {
+  return mutationOptions({
+    mutationFn: async (input: {
+      id: string;
+      name: string;
+    }): Promise<{
+      userCode: string;
+      verificationUri: string;
+      expiresIn: number;
+      interval: number;
+    }> => {
+      const response = await client(
+        `/api/admin/connections/${encodeURIComponent(input.id)}/ms-connect/start`,
+        {
+          method: "POST",
+          body: { name: input.name },
+          fallback: "Could not start Microsoft sign-in.",
+        },
+      );
+      return (await response.json()) as {
+        userCode: string;
+        verificationUri: string;
+        expiresIn: number;
+        interval: number;
+      };
+    },
+  });
+}
+
+export function msConnectPollMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (
+      id: string,
+    ): Promise<{ status: string; error?: string }> => {
+      const response = await client(
+        `/api/admin/connections/${encodeURIComponent(id)}/ms-connect/poll`,
+        { method: "POST", fallback: "Could not check the sign-in." },
+      );
+      return (await response.json()) as { status: string; error?: string };
+    },
+    onSettled: () => invalidate(queryClient),
+  });
+}

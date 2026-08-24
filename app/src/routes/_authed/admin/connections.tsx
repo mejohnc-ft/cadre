@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ComputerView } from "@/components/computer/computer-view";
 import {
   PageEmpty,
@@ -41,6 +41,8 @@ import {
   connectBeginMutationOptions,
   connectCaptureMutationOptions,
   grantConnectionMutationOptions,
+  msConnectPollMutationOptions,
+  msConnectStartMutationOptions,
   removeConnectionMutationOptions,
   revokeConnectionMutationOptions,
   saveConnectionMutationOptions,
@@ -76,6 +78,15 @@ function ConnectionsPage() {
     botId: string;
   } | null>(null);
   const [connectNote, setConnectNote] = useState("");
+  const msStart = useMutation(msConnectStartMutationOptions());
+  const msPoll = useMutation(msConnectPollMutationOptions(queryClient));
+  const [msDevice, setMsDevice] = useState<{
+    id: string;
+    name: string;
+    userCode: string;
+    verificationUri: string;
+  } | null>(null);
+  const [msStatus, setMsStatus] = useState("");
   const [editing, setEditing] = useState<Connection | "new" | null>(null);
   const [granting, setGranting] = useState<Connection | null>(null);
   const [grantee, setGrantee] = useState("");
@@ -87,6 +98,64 @@ function ConnectionsPage() {
   const connectBot = agentIds.includes("incident-buddy")
     ? "incident-buddy"
     : agentIds[0];
+
+  /**
+   * Microsoft device-code sign-in: get a code, show it, and poll until the person finishes signing
+   * in on their own browser. No screencast, no password in Cadre.
+   */
+  async function startMs(service: { id: string; name: string }) {
+    setMsStatus("Getting a sign-in code from Microsoft…");
+    setMsDevice({
+      id: service.id,
+      name: service.name,
+      userCode: "",
+      verificationUri: "",
+    });
+    try {
+      const started = await msStart.mutateAsync({
+        id: service.id,
+        name: service.name,
+      });
+      setMsDevice({
+        id: service.id,
+        name: service.name,
+        userCode: started.userCode,
+        verificationUri: started.verificationUri,
+      });
+      setMsStatus("Open the link, enter the code, and sign in. Waiting…");
+    } catch (error) {
+      setMsStatus(
+        `Could not start: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  // Poll for completion while the device-code dialog is open with a live code.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: poll only keys off the connection id.
+  useEffect(() => {
+    if (!msDevice?.userCode) return;
+    let stop = false;
+    const tick = async () => {
+      if (stop) return;
+      const result = await msPoll.mutateAsync(msDevice.id);
+      if (stop) return;
+      if (result.status === "connected") {
+        setMsStatus("Connected.");
+        setMsDevice(null);
+      } else if (result.status === "pending") {
+        setTimeout(tick, 4000);
+      } else if (result.status === "expired") {
+        setMsStatus("The code expired. Start again.");
+      } else if (result.status === "failed") {
+        setMsStatus(`Sign-in failed: ${result.error ?? ""}`);
+      }
+    };
+    const timer = setTimeout(tick, 4000);
+    return () => {
+      stop = true;
+      clearTimeout(timer);
+    };
+  }, [msDevice?.id, msDevice?.userCode]);
 
   /**
    * Open the sign-in dialog and start the login. The dialog appears at once (the live screen shows
@@ -191,8 +260,11 @@ function ConnectionsPage() {
                   </ItemContent>
                   <ItemActions>
                     <Button
-                      disabled={!connectBot}
-                      onClick={() => openConnect(service)}
+                      onClick={() =>
+                        service.tag === "microsoft"
+                          ? startMs(service)
+                          : openConnect(service)
+                      }
                       size="sm"
                       variant={connected ? "outline" : "default"}
                     >
@@ -436,6 +508,47 @@ function ConnectionsPage() {
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open) setMsDevice(null);
+        }}
+        open={!!msDevice}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Sign in to {msDevice?.name}</DialogTitle>
+            <DialogDescription>
+              Open the link in your own browser, enter the code, and sign in —
+              password, MFA, everything. Your password never comes to Cadre;
+              Microsoft hands back a token when you're done.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2 text-center">
+            {msDevice?.userCode ? (
+              <>
+                <a
+                  className="inline-block text-primary underline"
+                  href={msDevice.verificationUri}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  {msDevice.verificationUri}
+                </a>
+                <div className="select-all rounded-md bg-muted py-4 font-mono text-3xl tracking-widest">
+                  {msDevice.userCode}
+                </div>
+              </>
+            ) : null}
+            <p className="text-muted-foreground text-sm">{msStatus}</p>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setMsDevice(null)} variant="outline">
+              Close
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
