@@ -11,6 +11,7 @@ import {
   NO_SECRET_PENDING,
   TAKE_CONTROL_FIRST,
 } from "./control";
+import { createHarness } from "./harness";
 import { identity } from "./identity";
 import { createProfiles, VIEWPORT } from "./profiles";
 import {
@@ -18,7 +19,6 @@ import {
   type Screencast,
   startScreencast,
 } from "./screencast";
-import { createHarness } from "./harness";
 import { createShell } from "./shell";
 import {
   createWorkspace,
@@ -255,6 +255,38 @@ async function readablePageText(
 }
 
 /**
+ * Values delivered through the secret channel, so a snapshot cannot hand them back.
+ *
+ * Playwright's aria snapshot reports every control's current value — including password fields,
+ * whose masking is visual, not structural. Without this, the secret path holds in one direction
+ * only: the server types a password the Bot never saw, and the Bot's next snapshot reads it out
+ * of the field. Every value that arrives via /human/secret is remembered here, in this process's
+ * memory and nowhere else, and scrubbed from every snapshot that would echo it.
+ *
+ * A ring, not a set that grows forever; a computer sees a handful of secrets in its lifetime.
+ */
+const typedSecrets: string[] = [];
+const TYPED_SECRETS_LIMIT = 50;
+
+function rememberTypedSecret(value: string) {
+  if (typedSecrets.includes(value)) return;
+  typedSecrets.push(value);
+  if (typedSecrets.length > TYPED_SECRETS_LIMIT) typedSecrets.shift();
+}
+
+function scrubTypedSecrets(elements: SnapshotElement[]): SnapshotElement[] {
+  return elements.map((element) => {
+    if (
+      element.value &&
+      typedSecrets.some((secret) => (element.value as string).includes(secret))
+    ) {
+      return { ...element, value: "•••" };
+    }
+    return element;
+  });
+}
+
+/**
  * Describe everything on the page a Bot can act on.
  *
  * Uses Playwright's AI snapshot rather than stamping attributes into the DOM. `ariaSnapshot` keeps
@@ -273,11 +305,13 @@ async function snapshotPage(
 }> {
   session.snapshotId += 1;
   const yaml = await target.ariaSnapshot({ mode: "ai" });
+  const parsed = parseAriaSnapshot(yaml);
   return {
     snapshotId: session.snapshotId,
     url: target.url(),
     title: await target.title(),
-    ...parseAriaSnapshot(yaml),
+    ...parsed,
+    elements: scrubTypedSecrets(parsed.elements),
   };
 }
 
@@ -597,6 +631,7 @@ serve<StreamData>({
         await field.click({ timeout: ACTION_TIMEOUT_MS });
         await field.fill(body.text, { timeout: ACTION_TIMEOUT_MS });
         const characters = body.text.length;
+        rememberTypedSecret(body.text);
         // Cleared only after it actually landed, so a failure leaves the request open and the person
         // can try again rather than being told to start over.
         session.control.secretSupplied();
