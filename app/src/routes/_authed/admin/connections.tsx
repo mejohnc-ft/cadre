@@ -80,6 +80,46 @@ function ConnectionsPage() {
 
   const rows = connections.data?.connections ?? [];
   const agentIds = agents.data?.map((agent) => agent.id) ?? [];
+  const [quickBusy, setQuickBusy] = useState<string | null>(null);
+
+  // The coworker whose browser the login runs in. Prefer Incident Buddy; fall back to the first.
+  const connectBot = agentIds.includes("incident-buddy")
+    ? "incident-buddy"
+    : agentIds[0];
+
+  /** One click: create the connection, grant it, open the real login, hand over the live screen. */
+  async function quickConnect(service: {
+    id: string;
+    name: string;
+    loginUrl: string;
+    tag: string;
+  }) {
+    if (!connectBot) return;
+    setQuickBusy(service.id);
+    try {
+      await save.mutateAsync({
+        id: service.id,
+        name: service.name,
+        kind: "web",
+        service: service.tag,
+        loginUrl: service.loginUrl,
+      });
+      await grant.mutateAsync({ id: service.id, agentId: connectBot });
+      const result = await connectBegin.mutateAsync({
+        id: service.id,
+        agentId: connectBot,
+      });
+      const conn = (
+        await queryClient.fetchQuery(connectionsQueryOptions())
+      ).connections.find((c) => c.id === service.id);
+      if (conn && result.botId) {
+        setConnectNote(result.note);
+        setConnecting({ connection: conn, botId: result.botId });
+      }
+    } finally {
+      setQuickBusy(null);
+    }
+  }
 
   return (
     <PageShell
@@ -91,6 +131,49 @@ function ConnectionsPage() {
       description="Credentials for the services your coworkers' workflows touch — API tokens, CLI logins, website passwords. A secret is stored encrypted, never shown again, and never enters a computer: API calls go through the egress proxy and web passwords are typed by the server. Use is granted per coworker."
       title="Connections"
     >
+      <PageSection title="Connect a service">
+        <p className="mb-3 text-muted-foreground text-sm">
+          One click opens the real sign-in page in {connectBot ?? "a coworker"}
+          's browser. You sign in — password, MFA, everything — on the vendor's
+          own page, and the session is captured. No password is entered into
+          Cadre.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {[
+            {
+              tag: "microsoft",
+              id: "m365-admin",
+              name: "Microsoft 365 Admin",
+              loginUrl: "https://admin.microsoft.com",
+              label: "Connect Microsoft 365",
+            },
+            {
+              tag: "google",
+              id: "google-workspace",
+              name: "Google Workspace Admin",
+              loginUrl: "https://admin.google.com",
+              label: "Connect Google Workspace",
+            },
+            {
+              tag: "microsoft",
+              id: "outlook",
+              name: "Outlook (Microsoft)",
+              loginUrl: "https://outlook.office.com/mail/",
+              label: "Connect Outlook",
+            },
+          ].map((service) => (
+            <Button
+              disabled={!connectBot || quickBusy !== null}
+              key={service.id}
+              onClick={() => quickConnect(service)}
+              variant="outline"
+            >
+              {quickBusy === service.id ? "Opening…" : service.label}
+            </Button>
+          ))}
+        </div>
+      </PageSection>
+
       <PageSection title="Vault">
         {rows.length === 0 ? (
           <PageEmpty>
