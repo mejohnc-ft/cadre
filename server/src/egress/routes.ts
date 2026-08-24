@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { parseEgressRules, requestAllowed } from "../connections/egress-rules";
 import type { ConnectionStore } from "../connections/store";
 import type { ProviderStore } from "../providers/store";
 
@@ -68,13 +69,22 @@ export function createEgressRoutes(input: {
         403,
       );
     }
-    const key = await vault.secretOf(connectionId);
-    if (!key)
-      return context.json({ error: "The connection has no secret." }, 503);
     const subPath = new URL(context.req.url).pathname.replace(
       new RegExp(`^.*/egress/conn/${botId}/${connectionId}`),
       "",
     );
+    const rules = parseEgressRules(connection.allowedPaths ?? []);
+    if (!requestAllowed(rules, context.req.method, subPath)) {
+      return context.json(
+        {
+          error: `The connection ${connectionId} does not allow ${context.req.method} ${subPath}.`,
+        },
+        403,
+      );
+    }
+    const key = await vault.secretOf(connectionId);
+    if (!key)
+      return context.json({ error: "The connection has no secret." }, 503);
     const headers = new Headers();
     for (const name of ["content-type", "accept"]) {
       const value = context.req.header(name);

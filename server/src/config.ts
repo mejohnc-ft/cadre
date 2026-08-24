@@ -212,8 +212,37 @@ function optional(environment: Environment, name: string): string | undefined {
  */
 const PLACEHOLDER_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
+/**
+ * The master key from the operating system's keychain, where a deployment has put it there.
+ *
+ * `slice key keychain` moves the key out of ~/.slice/slice.env and into the macOS keychain; from
+ * then on the env file holds no key and this lookup supplies it. The env variable still wins when
+ * both exist, because an explicit setting should never be silently outvoted, and Linux servers
+ * keep using the env file unchanged.
+ */
+function keychainEncryptionKey(): string | null {
+  if (process.platform !== "darwin") return null;
+  try {
+    const found = Bun.spawnSync([
+      "security",
+      "find-generic-password",
+      "-s",
+      "cadre-key-encryption",
+      "-w",
+    ]);
+    if (found.exitCode !== 0) return null;
+    const value = found.stdout.toString().trim();
+    return value.length > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 function keyEncryptionKey(environment: Environment): string {
-  const value = required(environment, "KEY_ENCRYPTION_KEY");
+  const value =
+    environment.KEY_ENCRYPTION_KEY?.trim() ||
+    keychainEncryptionKey() ||
+    required(environment, "KEY_ENCRYPTION_KEY");
   const decoded = Buffer.from(value, "base64");
 
   if (decoded.byteLength !== 32 || decoded.toString("base64") !== value) {

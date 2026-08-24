@@ -34,6 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
   grantConnectionMutationOptions,
@@ -93,6 +94,19 @@ function ConnectionsPage() {
                       <Badge variant="outline">{connection.kind}</Badge>
                       {connection.hasTotp ? (
                         <Badge variant="secondary">totp</Badge>
+                      ) : null}
+                      {connection.kind === "api" ? (
+                        <Badge
+                          variant={
+                            (connection.allowedPaths?.length ?? 0) > 0
+                              ? "secondary"
+                              : "outline"
+                          }
+                        >
+                          {(connection.allowedPaths?.length ?? 0) > 0
+                            ? `${connection.allowedPaths?.length} rules`
+                            : "whole API"}
+                        </Badge>
                       ) : null}
                     </ItemTitle>
                     <ItemDescription>
@@ -253,6 +267,7 @@ function EditConnectionDialog(props: {
     username?: string;
     secret?: string;
     totpSeed?: string;
+    allowedPaths?: string[] | null;
     notes?: string;
   }) => void;
 }) {
@@ -266,6 +281,7 @@ function EditConnectionDialog(props: {
   const [username, setUsername] = useState("");
   const [secret, setSecret] = useState("");
   const [totpSeed, setTotpSeed] = useState("");
+  const [allowedPaths, setAllowedPaths] = useState("");
   const [seeded, setSeeded] = useState<string | null>(null);
 
   // Seed the form when a different connection opens; a dialog is reused, state is not.
@@ -281,6 +297,7 @@ function EditConnectionDialog(props: {
     setUsername(existing?.username ?? "");
     setSecret("");
     setTotpSeed("");
+    setAllowedPaths((existing?.allowedPaths ?? []).join("\n"));
   }
 
   const ready =
@@ -376,6 +393,16 @@ function EditConnectionDialog(props: {
             type="password"
             value={secret}
           />
+          {kind === "api" ? (
+            <Textarea
+              onChange={(event) => setAllowedPaths(event.target.value)}
+              placeholder={
+                "Allowed requests, one per line (blank allows the whole API):\nGET /zones/**\nPOST /zones/*/dns_records"
+              }
+              rows={3}
+              value={allowedPaths}
+            />
+          ) : null}
           {kind === "web" ? (
             <Input
               onChange={(event) => setTotpSeed(event.target.value)}
@@ -402,6 +429,14 @@ function EditConnectionDialog(props: {
                 ...(username.trim() ? { username: username.trim() } : {}),
                 ...(secret ? { secret } : {}),
                 ...(totpSeed ? { totpSeed } : {}),
+                ...(kind === "api"
+                  ? {
+                      allowedPaths: allowedPaths
+                        .split("\n")
+                        .map((line) => line.trim())
+                        .filter(Boolean),
+                    }
+                  : {}),
               })
             }
           >

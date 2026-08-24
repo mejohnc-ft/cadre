@@ -1,5 +1,6 @@
 import { pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
 import { agents } from "./core";
+import { jsonb } from "./json";
 
 /**
  * Connections: the credentials a coworker's workflows use, held where no coworker can read them.
@@ -38,6 +39,11 @@ export const connections = pgTable("connections", {
   secretEncrypted: text("secret_encrypted").notNull(),
   /** TOTP seed for logins with one-time codes; the server computes the six digits. */
   totpEncrypted: text("totp_encrypted"),
+  /**
+   * For api connections: which requests egress will forward, as "METHOD /path" rules with `*` and
+   * `**` wildcards. Null or empty forwards the whole API — the token's own scopes then rule.
+   */
+  allowedPaths: jsonb("allowed_paths").$type<string[]>(),
   notes: text("notes"),
   createdAt: createdAt(),
   updatedAt: timestamp("updated_at", { withTimezone: true })

@@ -148,6 +148,13 @@
       "when": 1787541099867,
       "tag": "0020_connections",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1787542151730,
+      "tag": "0021_connection-egress-rules",
+      "breakpoints": true
     }
   ]
 }

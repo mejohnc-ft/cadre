@@ -18,6 +18,7 @@ export function saveConnectionMutationOptions(queryClient: QueryClient) {
       username?: string;
       secret?: string;
       totpSeed?: string;
+      allowedPaths?: string[] | null;
       notes?: string;
     }) => {
       await client(`/api/admin/connections/${encodeURIComponent(input.id)}`, {

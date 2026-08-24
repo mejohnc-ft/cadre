@@ -10,6 +10,7 @@ export type Connection = {
   loginUrl: string | null;
   username: string | null;
   hasTotp: boolean;
+  allowedPaths: string[] | null;
   notes: string | null;
   grants: string[];
   updatedAt: string;

@@ -54,6 +54,7 @@ export function createConnectionRoutes(input: {
       username?: unknown;
       secret?: unknown;
       totpSeed?: unknown;
+      allowedPaths?: unknown;
       notes?: unknown;
     } | null;
     if (typeof body?.name !== "string" || !body.name.trim()) {
@@ -67,6 +68,25 @@ export function createConnectionRoutes(input: {
     }
     if (typeof body.service !== "string" || !body.service.trim()) {
       return context.json({ error: "service is required." }, 400);
+    }
+    let allowedPaths: string[] | null | undefined;
+    if (Array.isArray(body.allowedPaths)) {
+      const lines = body.allowedPaths.filter(
+        (line): line is string => typeof line === "string",
+      );
+      const { parseEgressRules } = await import("./egress-rules");
+      if (parseEgressRules(lines) === null) {
+        return context.json(
+          {
+            error:
+              'Each allowed path is "METHOD /path", like "POST /zones/*/dns_records" or "GET /zones/**".',
+          },
+          400,
+        );
+      }
+      allowedPaths = lines.length > 0 ? lines : null;
+    } else if (body.allowedPaths === null) {
+      allowedPaths = null;
     }
     try {
       const saved = await input.store.upsert({
@@ -86,6 +106,7 @@ export function createConnectionRoutes(input: {
           : typeof body.totpSeed === "string" && body.totpSeed
             ? { totpSeed: body.totpSeed }
             : {}),
+        ...(allowedPaths !== undefined ? { allowedPaths } : {}),
         notes: typeof body.notes === "string" ? body.notes : null,
         actor: context.var.actor.id,
       });

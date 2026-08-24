@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * `slice` — the local Mac shape, no web app and no Docker required.
  *
@@ -21,10 +22,10 @@
  *   slice audit [n]            the latest audit rows
  */
 
-import { parseArgs } from "node:util";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { parseArgs } from "node:util";
 import { describeCall, executeTool, TOOL_DEFINITIONS } from "./computer-tools";
 
 const HOME = join(homedir(), ".slice");
@@ -749,6 +750,90 @@ async function moveCmd(args: string[]) {
   );
 }
 
+/**
+ * Move the master encryption key out of ~/.slice/slice.env and into the macOS keychain.
+ *
+ * The vault's one structural weakness on a laptop is the key and the ciphertext sitting in two
+ * files on the same disk. The keychain closes half of that: the key is held by the OS, unlocked
+ * with the login session, and no longer readable by anything that can merely read the home
+ * directory. The server looks in the keychain whenever the env file holds no key.
+ */
+async function keyCmd(rest: string[]) {
+  if (rest[0] !== "keychain") {
+    fail(
+      "Usage: slice key keychain   (move KEY_ENCRYPTION_KEY into the macOS keychain)",
+    );
+  }
+  if (process.platform !== "darwin") {
+    fail(
+      "The keychain is a macOS feature. Linux servers keep the key in the env file.",
+    );
+  }
+  const env = loadEnv();
+  const key = env.KEY_ENCRYPTION_KEY;
+  if (!key) {
+    const probe = Bun.spawnSync([
+      "security",
+      "find-generic-password",
+      "-s",
+      "cadre-key-encryption",
+      "-w",
+    ]);
+    if (probe.exitCode === 0) {
+      console.log(
+        "Already in the keychain; the env file holds no key. Nothing to do.",
+      );
+      return;
+    }
+    fail(`No KEY_ENCRYPTION_KEY in ${ENV_FILE} and none in the keychain.`);
+  }
+  const add = Bun.spawnSync([
+    "security",
+    "add-generic-password",
+    "-U",
+    "-s",
+    "cadre-key-encryption",
+    "-a",
+    "cadre",
+    "-w",
+    key,
+  ]);
+  if (add.exitCode !== 0) {
+    fail(`The keychain refused the key: ${add.stderr.toString().trim()}`);
+  }
+  // Read it back before touching the env file; a key that cannot be read back must not be removed.
+  const check = Bun.spawnSync([
+    "security",
+    "find-generic-password",
+    "-s",
+    "cadre-key-encryption",
+    "-w",
+  ]);
+  if (check.exitCode !== 0 || check.stdout.toString().trim() !== key) {
+    fail(
+      "The key went into the keychain but could not be read back; the env file is untouched.",
+    );
+  }
+  const raw = readFileSync(ENV_FILE, "utf8");
+  writeFileSync(`${ENV_FILE}.backup`, raw, { mode: 0o600 });
+  const stripped = raw
+    .split("\n")
+    .map((line) =>
+      line.startsWith("KEY_ENCRYPTION_KEY=")
+        ? "# KEY_ENCRYPTION_KEY moved to the macOS keychain (service: cadre-key-encryption)."
+        : line,
+    )
+    .join("\n");
+  writeFileSync(ENV_FILE, stripped, { mode: 0o600 });
+  console.log(
+    `Moved. The keychain holds the key (service cadre-key-encryption); ${ENV_FILE} no longer does.`,
+  );
+  console.log(
+    `A copy of the old env file is at ${ENV_FILE}.backup — delete it once the server restarts cleanly.`,
+  );
+  console.log("Restart with: slice up");
+}
+
 // -------------------------------------------------------------------- main --
 
 const [command, ...rest] = process.argv.slice(2);
@@ -791,12 +876,16 @@ switch (command) {
   case "sync":
     await syncCmd(rest);
     break;
+  case "key":
+    await keyCmd(rest);
+    break;
   default:
     console.log(`cadre — a personal agent control plane, on this Mac
 
   slice init [--cpus 4] [--memory-gb 8]   dedicate a slice of this Mac to agents
   slice up                                start everything (VMs for postgres and computers)
   slice down                              stop everything; volumes survive
+  slice key keychain                      hold the master key in the macOS keychain, not a file
   slice status                            what is running, and the slice's use
   slice agents                            list coworkers
   slice chat [--thread id] <bot> "..."    one governed turn; --thread continues a conversation

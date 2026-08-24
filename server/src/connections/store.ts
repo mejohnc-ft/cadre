@@ -27,6 +27,7 @@ export type Connection = {
   loginUrl: string | null;
   username: string | null;
   hasTotp: boolean;
+  allowedPaths: string[] | null;
   notes: string | null;
   grants: string[];
   updatedAt: string;
@@ -45,6 +46,7 @@ function toConnection(
     loginUrl: row.loginUrl,
     username: row.username,
     hasTotp: row.totpEncrypted !== null,
+    allowedPaths: row.allowedPaths ?? null,
     notes: row.notes,
     grants,
     updatedAt: row.updatedAt.toISOString(),
@@ -104,16 +106,31 @@ export function createConnectionStore(
       username?: string | null;
       secret?: string;
       totpSeed?: string | null;
+      allowedPaths?: string[] | null;
       notes?: string | null;
       actor?: string;
     }): Promise<{ created: boolean }> {
       const [existing] = await database
-        .select({ id: connections.id })
+        .select({ id: connections.id, baseUrl: connections.baseUrl })
         .from(connections)
         .where(eq(connections.id, input.id))
         .limit(1);
       if (!existing && !input.secret) {
         throw new Error("A new connection needs a secret.");
+      }
+      /*
+       * A changed base URL with the old secret is the exfiltration shape: the vault would send a
+       * stored token wherever the URL now points. Whoever legitimately moves an endpoint has the
+       * credential and can retype it; whoever cannot retype it should not be moving the endpoint.
+       */
+      if (
+        existing &&
+        (input.baseUrl ?? null) !== existing.baseUrl &&
+        !input.secret
+      ) {
+        throw new Error(
+          "Changing the base URL requires re-entering the secret.",
+        );
       }
       const encrypted = input.secret
         ? await encryptSecret(encryptionKey, input.secret)
@@ -131,6 +148,8 @@ export function createConnectionStore(
         baseUrl: input.baseUrl ?? null,
         loginUrl: input.loginUrl ?? null,
         username: input.username ?? null,
+        allowedPaths:
+          input.allowedPaths === undefined ? null : input.allowedPaths,
         notes: input.notes ?? null,
         updatedAt: new Date(),
         ...(encrypted ? { secretEncrypted: encrypted } : {}),
