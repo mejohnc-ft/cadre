@@ -310,6 +310,7 @@ function EditConnectionDialog(props: {
 }) {
   const existing = props.connection !== "new" ? props.connection : null;
   const [id, setId] = useState("");
+  const [idTouched, setIdTouched] = useState(false);
   const [name, setName] = useState("");
   const [kind, setKind] = useState<Connection["kind"]>("api");
   const [service, setService] = useState("");
@@ -326,6 +327,7 @@ function EditConnectionDialog(props: {
   if (openId !== null && openId !== seeded) {
     setSeeded(openId);
     setId(existing?.id ?? "");
+    setIdTouched(false);
     setName(existing?.name ?? "");
     setKind(existing?.kind ?? "api");
     setService(existing?.service ?? "");
@@ -337,11 +339,28 @@ function EditConnectionDialog(props: {
     setAllowedPaths((existing?.allowedPaths ?? []).join("\n"));
   }
 
-  const ready =
-    (existing ? true : /^[a-z0-9][a-z0-9-]*$/.test(id)) &&
-    name.trim() &&
-    service.trim() &&
-    (existing ? true : secret.trim());
+  // The id is derived from the name unless the operator has typed one — nobody should have to
+  // think about slugs to save a login. It stays visible so a collision is obvious before saving.
+  const slugify = (value: string) =>
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40);
+  const effectiveId = existing?.id ?? (idTouched ? id : slugify(name));
+
+  const missing: string[] = [];
+  if (!existing) {
+    if (!name.trim()) missing.push("a name");
+    if (!effectiveId) missing.push("a name that yields an id");
+    if (!service.trim()) missing.push("a service");
+    if (!secret.trim()) {
+      missing.push(kind === "web" ? "a password" : "a token");
+    }
+  } else if (!name.trim()) {
+    missing.push("a name");
+  }
+  const ready = missing.length === 0;
 
   return (
     <Dialog
@@ -359,18 +378,25 @@ function EditConnectionDialog(props: {
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
-          {existing ? null : (
-            <Input
-              onChange={(event) => setId(event.target.value)}
-              placeholder='Short id, like "hover" or "netlify"'
-              value={id}
-            />
-          )}
           <Input
             onChange={(event) => setName(event.target.value)}
-            placeholder="Name, like Hover (personal)"
+            placeholder="Name, like Microsoft 365 (Contoso)"
             value={name}
           />
+          {existing ? null : (
+            <div className="flex items-center gap-2 text-muted-foreground text-xs">
+              <span className="shrink-0">Saved as id:</span>
+              <Input
+                className="h-7 font-mono text-xs"
+                onChange={(event) => {
+                  setIdTouched(true);
+                  setId(event.target.value);
+                }}
+                placeholder="auto from name"
+                value={effectiveId}
+              />
+            </div>
+          )}
           <Input
             onChange={(event) => setService(event.target.value)}
             placeholder='Service, like "hover" or "cloudflare"'
@@ -449,7 +475,12 @@ function EditConnectionDialog(props: {
             />
           ) : null}
         </div>
-        <DialogFooter>
+        <DialogFooter className="flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-end">
+          {ready ? null : (
+            <span className="mr-auto text-muted-foreground text-xs">
+              Add {missing.join(", ")} to save.
+            </span>
+          )}
           <Button onClick={props.onClose} variant="ghost">
             Cancel
           </Button>
@@ -457,10 +488,10 @@ function EditConnectionDialog(props: {
             disabled={!ready || props.pending}
             onClick={() =>
               props.onSave({
-                id: existing?.id ?? id,
+                id: existing?.id ?? effectiveId,
                 name: name.trim(),
                 kind,
-                service: service.trim(),
+                service: service.trim() || slugify(name),
                 ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
                 ...(loginUrl.trim() ? { loginUrl: loginUrl.trim() } : {}),
                 ...(username.trim() ? { username: username.trim() } : {}),
