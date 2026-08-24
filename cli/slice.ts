@@ -230,7 +230,7 @@ async function up() {
 
   info("2/4 postgres");
   await ensurePostgres();
-  const migrate = await sh(["bun", "run", "db:migrate"], {
+  const migrate = await sh([process.execPath, "run", "db:migrate"], {
     cwd: join(REPO, "server"),
     env: { DATABASE_URL: env.DATABASE_URL ?? DATABASE_URL },
   });
@@ -241,7 +241,7 @@ async function up() {
 
   info("3/4 supervisor (apple backend)");
   if (!(await answering(`http://127.0.0.1:${SUPERVISOR_PORT}/health`))) {
-    Bun.spawn(["bun", join(REPO, "supervisor/src/index.ts")], {
+    Bun.spawn([process.execPath, join(REPO, "supervisor/src/index.ts")], {
       cwd: join(REPO, "supervisor"),
       env: {
         ...process.env,
@@ -269,7 +269,7 @@ async function up() {
 
   info("4/4 server");
   if (!(await answering(`http://127.0.0.1:${SERVER_PORT}/api/capabilities`))) {
-    Bun.spawn(["bun", join(REPO, "server/src/index.ts")], {
+    Bun.spawn([process.execPath, join(REPO, "server/src/index.ts")], {
       cwd: join(REPO, "server"),
       env: {
         ...process.env,
