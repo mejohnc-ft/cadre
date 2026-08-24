@@ -32,6 +32,7 @@ import { Route as AuthedAdminSkillsRouteImport } from './routes/_authed/admin/sk
 import { Route as AuthedAdminTriggersRouteImport } from './routes/_authed/admin/triggers'
 import { Route as AuthedAdminUsageRouteImport } from './routes/_authed/admin/usage'
 import { Route as AuthedSettingsIndexRouteImport } from './routes/_authed/settings/index'
+import { Route as EmbedComputerBotIdRouteImport } from './routes/embed.computer.$botId'
 import { Route as AuthedAppAgentsIndexRouteImport } from './routes/_authed/_app/agents/index'
 import { Route as AuthedAppChannelChannelIdRouteImport } from './routes/_authed/_app/channel/$channelId'
 import { Route as AuthedAppChannelNewRouteImport } from './routes/_authed/_app/channel/new'
@@ -159,6 +160,11 @@ const AuthedSettingsIndexRoute = AuthedSettingsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AuthedSettingsRouteRoute,
 } as any)
+const EmbedComputerBotIdRoute = EmbedComputerBotIdRouteImport.update({
+  id: '/embed/computer/$botId',
+  path: '/embed/computer/$botId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthedAppAgentsIndexRoute = AuthedAppAgentsIndexRouteImport.update({
   id: '/agents/',
   path: '/agents/',
@@ -248,6 +254,7 @@ export interface FileRoutesByFullPath {
   '/admin/skills': typeof AuthedAdminSkillsRoute
   '/admin/triggers': typeof AuthedAdminTriggersRoute
   '/admin/usage': typeof AuthedAdminUsageRoute
+  '/embed/computer/$botId': typeof EmbedComputerBotIdRoute
   '/admin/': typeof AuthedAdminIndexRoute
   '/settings/': typeof AuthedSettingsIndexRoute
   '/channel/$channelId': typeof AuthedAppChannelChannelIdRoute
@@ -281,6 +288,7 @@ export interface FileRoutesByTo {
   '/admin/skills': typeof AuthedAdminSkillsRoute
   '/admin/triggers': typeof AuthedAdminTriggersRoute
   '/admin/usage': typeof AuthedAdminUsageRoute
+  '/embed/computer/$botId': typeof EmbedComputerBotIdRoute
   '/admin': typeof AuthedAdminIndexRoute
   '/settings': typeof AuthedSettingsIndexRoute
   '/channel/$channelId': typeof AuthedAppChannelChannelIdRoute
@@ -318,6 +326,7 @@ export interface FileRoutesById {
   '/_authed/admin/skills': typeof AuthedAdminSkillsRoute
   '/_authed/admin/triggers': typeof AuthedAdminTriggersRoute
   '/_authed/admin/usage': typeof AuthedAdminUsageRoute
+  '/embed/computer/$botId': typeof EmbedComputerBotIdRoute
   '/_authed/_app/': typeof AuthedAppIndexRoute
   '/_authed/admin/': typeof AuthedAdminIndexRoute
   '/_authed/settings/': typeof AuthedSettingsIndexRoute
@@ -356,6 +365,7 @@ export interface FileRouteTypes {
     | '/admin/skills'
     | '/admin/triggers'
     | '/admin/usage'
+    | '/embed/computer/$botId'
     | '/admin/'
     | '/settings/'
     | '/channel/$channelId'
@@ -389,6 +399,7 @@ export interface FileRouteTypes {
     | '/admin/skills'
     | '/admin/triggers'
     | '/admin/usage'
+    | '/embed/computer/$botId'
     | '/admin'
     | '/settings'
     | '/channel/$channelId'
@@ -425,6 +436,7 @@ export interface FileRouteTypes {
     | '/_authed/admin/skills'
     | '/_authed/admin/triggers'
     | '/_authed/admin/usage'
+    | '/embed/computer/$botId'
     | '/_authed/_app/'
     | '/_authed/admin/'
     | '/_authed/settings/'
@@ -445,6 +457,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   AuthedRoute: typeof AuthedRouteWithChildren
   SignRoute: typeof SignRoute
+  EmbedComputerBotIdRoute: typeof EmbedComputerBotIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -609,6 +622,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/settings/'
       preLoaderRoute: typeof AuthedSettingsIndexRouteImport
       parentRoute: typeof AuthedSettingsRouteRoute
+    }
+    '/embed/computer/$botId': {
+      id: '/embed/computer/$botId'
+      path: '/embed/computer/$botId'
+      fullPath: '/embed/computer/$botId'
+      preLoaderRoute: typeof EmbedComputerBotIdRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/_authed/_app/agents/': {
       id: '/_authed/_app/agents/'
@@ -807,6 +827,7 @@ const AuthedRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   AuthedRoute: AuthedRouteWithChildren,
   SignRoute: SignRoute,
+  EmbedComputerBotIdRoute: EmbedComputerBotIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

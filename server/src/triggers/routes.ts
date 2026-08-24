@@ -127,11 +127,28 @@ export function createTriggerRoutes(input: {
     return context.json(outcome);
   });
 
+  /*
+   * The webhook is called cross-origin by other apps (the Service Toolbox investigation panel POSTs
+   * a ticket here), so it answers CORS preflight and echoes the allow headers on the POST. The token
+   * is still the whole authorisation; CORS only lets a browser make the request.
+   */
+  app.options("/hooks/:id", (context) => {
+    context.header("access-control-allow-origin", "*");
+    context.header("access-control-allow-methods", "POST, OPTIONS");
+    context.header(
+      "access-control-allow-headers",
+      "content-type, x-cadre-token",
+    );
+    context.header("access-control-max-age", "86400");
+    return context.body(null, 204);
+  });
+
   /**
    * The webhook. Token in the X-Cadre-Token header or ?token=. The request body, if any, is
    * handed to the coworker beneath the trigger's prompt.
    */
   app.post("/hooks/:id", async (context) => {
+    context.header("access-control-allow-origin", "*");
     const id = context.req.param("id");
     const token =
       context.req.header("x-cadre-token") ?? context.req.query("token") ?? "";
