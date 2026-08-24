@@ -30,6 +30,9 @@ import { createThreadReader } from "./channels/thread-status";
 import type { ComputerProvider } from "./computer/provider";
 import type { ActionPolicy } from "./computer/policy";
 import { createArtifactRoutes } from "./artifacts/routes";
+import { createProviderRoutes } from "./providers/routes";
+import type { ProviderStore } from "./providers/store";
+import type { Database } from "./db/client";
 import type { ArtifactStore } from "./artifacts/store";
 import { createHarnessRoutes } from "./harness/routes";
 import type { MeshProvider } from "./mesh/provider";
@@ -177,6 +180,8 @@ export function createApp(
   },
   /** The artifact registry, when this deployment has one. */
   artifactStore?: ArtifactStore,
+  /** Providers and model routing. */
+  providers?: { store: ProviderStore; database: Database },
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -677,6 +682,17 @@ export function createApp(
     app.route(
       "/api",
       createArtifactRoutes({ store: artifactStore, requireUser }),
+    );
+  }
+
+  if (providers) {
+    app.route(
+      "/api",
+      createProviderRoutes({
+        store: providers.store,
+        database: providers.database,
+        requireUser,
+      }),
     );
   }
 

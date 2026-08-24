@@ -36,12 +36,19 @@ export type HarnessOptions = {
 
 type AgUiMessage = { id?: string; role?: string; content?: unknown };
 type Artifact = { kind: string; name: string; content: string };
+type RunModel = {
+  kind?: string;
+  baseUrl?: string | null;
+  model?: string;
+  key?: string;
+};
 type RunInput = {
   threadId: string;
   runId: string;
   harness?: string;
   messages?: AgUiMessage[];
   artifacts?: Artifact[];
+  model?: RunModel;
   forwardedProps?: Record<string, unknown>;
 };
 
@@ -102,14 +109,28 @@ export function createHarness(options: HarnessOptions) {
     return path;
   }
 
-  // The OpenAI-compatible endpoint the OpenAI-shaped harnesses (Pi, OpenCode) reach their model
-  // through, and the key for it. Supplied by the deployment; the image carries none of it.
+  // Where a run's model lives: the route the server sent, else the deployment environment. The
+  // image carries none of it.
   const provider = "slice";
-  const modelId = process.env.HARNESS_MODEL || "glm-5.3";
-  const openaiBase = process.env.HARNESS_OPENAI_BASE_URL || "";
-  const apiKey = process.env.HARNESS_ANTHROPIC_AUTH_TOKEN || "";
 
-  function opencodeConfigFile(): string {
+  function modelSettings(run?: RunModel) {
+    return {
+      modelId: run?.model || process.env.HARNESS_MODEL || "glm-5.3",
+      openaiBase:
+        (run?.kind?.startsWith("openai") ? run.baseUrl : undefined) ||
+        process.env.HARNESS_OPENAI_BASE_URL ||
+        "",
+      anthropicBase:
+        (run?.kind?.startsWith("anthropic") ? run.baseUrl : undefined) ||
+        process.env.HARNESS_ANTHROPIC_BASE_URL ||
+        "",
+      apiKey: run?.key || process.env.HARNESS_ANTHROPIC_AUTH_TOKEN || "",
+    };
+  }
+
+  function opencodeConfigFile(
+    settings: ReturnType<typeof modelSettings>,
+  ): string {
     const path = join(stateDir, "harness-opencode.json");
     writeFileSync(
       path,
@@ -121,8 +142,8 @@ export function createHarness(options: HarnessOptions) {
           [provider]: {
             npm: "@ai-sdk/openai-compatible",
             name: "Slice",
-            options: { baseURL: openaiBase, apiKey },
-            models: { [modelId]: { name: modelId } },
+            options: { baseURL: settings.openaiBase, apiKey: settings.apiKey },
+            models: { [settings.modelId]: { name: settings.modelId } },
           },
         },
       }),
@@ -130,7 +151,7 @@ export function createHarness(options: HarnessOptions) {
     return path;
   }
 
-  function piModelsFile(): void {
+  function piModelsFile(settings: ReturnType<typeof modelSettings>): void {
     const dir = join(process.env.HOME ?? "/root", ".pi", "agent");
     mkdirSync(dir, { recursive: true });
     writeFileSync(
@@ -138,13 +159,13 @@ export function createHarness(options: HarnessOptions) {
       JSON.stringify({
         providers: {
           [provider]: {
-            baseUrl: openaiBase,
+            baseUrl: settings.openaiBase,
             api: "openai-completions",
-            apiKey,
+            apiKey: settings.apiKey,
             models: [
               {
-                id: modelId,
-                name: modelId,
+                id: settings.modelId,
+                name: settings.modelId,
                 reasoning: true,
                 input: ["text"],
                 contextWindow: 200000,
@@ -198,7 +219,8 @@ export function createHarness(options: HarnessOptions) {
           return;
         }
 
-        if (adapter.id === "pi") piModelsFile();
+        const settings = modelSettings(input.model);
+        if (adapter.id === "pi") piModelsFile(settings);
         projectArtifacts(
           options.workspaceDir,
           adapter.id,
@@ -214,9 +236,9 @@ export function createHarness(options: HarnessOptions) {
           hooks: {
             claudeSettings: claudeSettingsFile(),
             piExtension: "/opt/slice/pi-slice.mjs",
-            opencodeConfig: opencodeConfigFile(),
+            opencodeConfig: opencodeConfigFile(settings),
           },
-          model: { id: modelId, provider },
+          model: { id: settings.modelId, provider },
         });
 
         const proc = Bun.spawn([adapter.binary, ...invocation.argv], {
@@ -231,12 +253,9 @@ export function createHarness(options: HarnessOptions) {
               ? { SLICE_SERVER_URL: options.serverUrl }
               : {}),
             ...(harnessId === "opencode"
-              ? {
-                  OPENCODE_CONFIG:
-                    invocation.env?.OPENCODE_CONFIG ?? opencodeConfigFile(),
-                }
+              ? { OPENCODE_CONFIG: opencodeConfigFile(settings) }
               : {}),
-            ...harnessModelEnv(harnessId),
+            ...harnessModelEnv(harnessId, settings),
             ...invocation.env,
           },
           stdin: "ignore",
@@ -324,17 +343,19 @@ export function createHarness(options: HarnessOptions) {
   return { run, available };
 }
 
-function harnessModelEnv(harnessId: string): Record<string, string> {
+function harnessModelEnv(
+  harnessId: string,
+  settings: { anthropicBase: string; apiKey: string; modelId: string },
+): Record<string, string> {
   const env: Record<string, string> = {};
-  const base = process.env.HARNESS_ANTHROPIC_BASE_URL;
-  const token = process.env.HARNESS_ANTHROPIC_AUTH_TOKEN;
-  const model = process.env.HARNESS_MODEL;
-  if (base) env.ANTHROPIC_BASE_URL = base;
-  if (token) {
-    env.ANTHROPIC_AUTH_TOKEN = token;
-    env.OPENAI_API_KEY = token;
+  if (settings.anthropicBase) env.ANTHROPIC_BASE_URL = settings.anthropicBase;
+  if (settings.apiKey) {
+    env.ANTHROPIC_AUTH_TOKEN = settings.apiKey;
+    env.OPENAI_API_KEY = settings.apiKey;
   }
-  if (model) env.ANTHROPIC_MODEL = model;
+  if (settings.modelId && harnessId === "claude-code") {
+    env.ANTHROPIC_MODEL = settings.modelId;
+  }
   if (harnessId === "claude-code") env.IS_SANDBOX = "1";
   return env;
 }

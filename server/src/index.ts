@@ -36,6 +36,7 @@ import { createMeshProvider } from "./mesh/provider";
 import { createNodeStore, createPlacementStore } from "./mesh/store";
 import type { SupervisorProvider } from "./computer/supervisor";
 import { createArtifactStore } from "./artifacts/store";
+import { createProviderStore } from "./providers/store";
 import { PostgresAgentRunner } from "./runtime/postgres-runner";
 import {
   actorForAgent,
@@ -217,6 +218,30 @@ const localProvider = config.computer
  */
 const nodeStore = createNodeStore(database, config.keyEncryptionKey);
 const artifactStore = createArtifactStore(database);
+const providerStore = createProviderStore(database, config.keyEncryptionKey);
+/*
+ * Seed providers from the environment the first time. A deployment configured before providers
+ * existed keeps working, and its configuration becomes visible, editable data.
+ */
+if ((await providerStore.list()).length === 0) {
+  const envKey = process.env.OPENAI_API_KEY?.trim();
+  const compatible = process.env.OPENAI_COMPATIBLE_BASE_URL?.trim();
+  const anthropicBase = process.env.HARNESS_ANTHROPIC_BASE_URL?.trim();
+  if (envKey && (compatible || anthropicBase)) {
+    await providerStore.upsert({
+      id: "env",
+      name: "From the environment",
+      kind: anthropicBase ? "anthropic-compatible" : "openai-compatible",
+      baseUrl: anthropicBase || compatible || null,
+      defaultModel: process.env.HARNESS_MODEL?.trim() || "glm-5.3",
+      isDefault: true,
+      key: envKey,
+    });
+    console.info(
+      "Seeded a model provider from the environment; manage it at /api/admin/providers.",
+    );
+  }
+}
 const placementStore = createPlacementStore(database);
 const computerProvider = createMeshProvider({
   ...(localProvider && "bundle" in localProvider
@@ -429,6 +454,25 @@ const threadRunner = new PostgresAgentRunner(database, {
 });
 await threadRunner.warm();
 
+/*
+ * Which model the built-in Bots speak to. An openai-shaped provider from the table wins — the
+ * default one if it qualifies, else any that does — because the built-ins speak chat-completions.
+ * With no such provider the environment decides, exactly as before providers existed.
+ */
+async function builtInModelSource() {
+  const providers = await providerStore.list();
+  const openaiShaped = providers.filter((p) => p.kind.startsWith("openai"));
+  const chosen =
+    openaiShaped.find((p) => p.isDefault) ?? openaiShaped[0] ?? null;
+  return chosen;
+}
+const builtInProvider = await builtInModelSource();
+if (builtInProvider) {
+  console.info(
+    `Built-in Bots use provider "${builtInProvider.id}" (${builtInProvider.defaultModel}).`,
+  );
+}
+
 const app = createApp(
   config,
   auth,
@@ -446,19 +490,32 @@ const app = createApp(
     config,
     {
       ...tenantPackage.model,
-      ...(config.openAiCompatibleBaseUrl
-        ? { compatibleBaseUrl: config.openAiCompatibleBaseUrl }
-        : {}),
+      ...(builtInProvider
+        ? {
+            defaultModel: builtInProvider.defaultModel,
+            ...(builtInProvider.baseUrl
+              ? { compatibleBaseUrl: builtInProvider.baseUrl }
+              : {}),
+          }
+        : config.openAiCompatibleBaseUrl
+          ? { compatibleBaseUrl: config.openAiCompatibleBaseUrl }
+          : {}),
     },
     loadAgentsForActor,
-    () =>
-      resolveModelApiKey({
+    async () => {
+      // The provider table first; the vault + environment as before, so nothing regresses.
+      if (builtInProvider) {
+        const route = await providerStore.routeFor("__deployment__");
+        if (route) return route.key;
+      }
+      return resolveModelApiKey({
         encryptionKey: config.keyEncryptionKey,
         reader: credentialStore,
         provider: tenantPackage.model.provider,
         keyId: tenantPackage.model.credentialSecretRef,
         environment: process.env,
-      }),
+      });
+    },
     identifyUser,
     identifyActor,
     stallGuard,
@@ -540,6 +597,17 @@ const app = createApp(
         ? { computerToken: config.computer.token }
         : {}),
       artifactsFor: (botId) => artifactStore.resolveForRun(botId),
+      modelFor: async (botId) => {
+        const route = await providerStore.routeFor(botId);
+        return route
+          ? {
+              kind: route.kind,
+              baseUrl: route.baseUrl,
+              model: route.model,
+              key: route.key,
+            }
+          : null;
+      },
     },
   ),
   // The only path to an acting call.
@@ -581,6 +649,7 @@ const app = createApp(
     audit: createAuditStore(database),
   },
   artifactStore,
+  { store: providerStore, database },
 );
 
 /**

@@ -169,3 +169,21 @@ curl -s localhost:3001/api/admin/agents/claude-code/artifacts -H 'content-type: 
 slice sync claude-code                 # writes ./AGENTS.md and ./skills/
 slice sync claude-code --claude        # also ~/.claude/CLAUDE.md (backs up an existing one first)
 ```
+
+## Model routing: providers as data
+
+Providers live in the database with their keys encrypted (write-only); one is the deployment
+default and a coworker can route to a different provider/model:
+
+```sh
+curl -s -X PUT localhost:3001/api/admin/providers/zai -H 'content-type: application/json' \
+  -d '{"kind":"openai-compatible","baseUrl":"https://api.z.ai/api/coding/paas/v4","defaultModel":"glm-5.3","isDefault":true,"key":"<key>"}'
+curl -s -X PUT localhost:3001/api/admin/agents/pi/model-route -H 'content-type: application/json' \
+  -d '{"providerId":"zai","model":"glm-4.7"}'          # pi now runs glm-4.7; others stay on the default
+curl -s localhost:3001/api/admin/usage                  # spend per coworker, last 30 days
+```
+
+Kinds: `anthropic`, `openai`, `anthropic-compatible`, `openai-compatible`. On first boot with no
+providers, one is seeded from the environment so existing deployments keep working. Built-in Bots
+use the default openai-shaped provider; harness coworkers follow their route (Claude Code speaks
+anthropic-shaped endpoints, Pi/OpenCode openai-shaped).

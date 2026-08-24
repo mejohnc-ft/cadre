@@ -8,3 +8,4 @@ export * from "./coworker";
 export * from "./threads";
 export * from "./mesh";
 export * from "./artifacts";
+export * from "./providers";

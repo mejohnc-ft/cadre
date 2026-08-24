@@ -837,6 +837,10 @@ serve<StreamData>({
         artifacts: Array.isArray((body as { artifacts?: unknown }).artifacts)
           ? ((body as { artifacts?: unknown }).artifacts as never)
           : [],
+        ...(typeof (body as { model?: unknown }).model === "object" &&
+        (body as { model?: unknown }).model !== null
+          ? { model: (body as { model?: never }).model }
+          : {}),
         forwardedProps: (body.forwardedProps ?? {}) as Record<string, unknown>,
       });
     }

@@ -224,11 +224,20 @@ export type HarnessArtifact = {
   content: string;
 };
 
+export type HarnessModel = {
+  kind: string;
+  baseUrl: string | null;
+  model: string;
+  key: string;
+};
+
 export type HarnessRuntime = {
   locate: (botId: string) => Promise<string>;
   computerToken?: string;
   /** The profile's artifacts, resolved for this run; written into the workspace by the computer. */
   artifactsFor?: (botId: string) => Promise<HarnessArtifact[]>;
+  /** The coworker's model route. Null falls back to the computer's environment. */
+  modelFor?: (botId: string) => Promise<HarnessModel | null>;
 };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -571,14 +580,18 @@ function remoteAgentWithStandingRole(
     // The profile's artifacts ride in the run body; the computer writes them into the workspace
     // before the engine starts, so a coworker's instructions and skills reach whichever harness.
     let body = init?.body;
-    if (harnessRuntime.artifactsFor && typeof body === "string") {
+    if (typeof body === "string") {
       try {
-        const artifacts = await harnessRuntime.artifactsFor(agent.id);
-        if (artifacts.length > 0) {
-          body = JSON.stringify({ ...JSON.parse(body), artifacts });
+        const extra: Record<string, unknown> = {};
+        const artifacts = await harnessRuntime.artifactsFor?.(agent.id);
+        if (artifacts && artifacts.length > 0) extra.artifacts = artifacts;
+        const model = await harnessRuntime.modelFor?.(agent.id);
+        if (model) extra.model = model;
+        if (Object.keys(extra).length > 0) {
+          body = JSON.stringify({ ...JSON.parse(body), ...extra });
         }
       } catch {
-        // A failure to attach artifacts must not fail the run; the engine runs without them.
+        // A failure to resolve context must not fail the run; the engine runs on the environment.
       }
     }
     return watched(`${base}/harness/run`, { ...init, headers, body });
