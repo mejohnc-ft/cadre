@@ -10,7 +10,7 @@ import "./styles.css";
 const rootElement = document.getElementById("root");
 
 if (!rootElement) {
-  throw new Error("Slice could not find the application root element.");
+  throw new Error("Cadre could not find the application root element.");
 }
 
 createRoot(rootElement).render(

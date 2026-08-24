@@ -792,7 +792,7 @@ switch (command) {
     await syncCmd(rest);
     break;
   default:
-    console.log(`slice — a personal agent control plane, on this Mac
+    console.log(`cadre — a personal agent control plane, on this Mac
 
   slice init [--cpus 4] [--memory-gb 8]   dedicate a slice of this Mac to agents
   slice up                                start everything (VMs for postgres and computers)

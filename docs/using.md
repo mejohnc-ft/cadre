@@ -1,4 +1,4 @@
-# Using Slice on this Mac (today's shape)
+# Using Cadre on this Mac (today's shape)
 
 This is the M0 "stock stack": Docker for the database and the Bots' computers, Bun on the host for
 the API and the app. The Apple `container` runtime and the `slice` CLI (M2) replace the Docker half

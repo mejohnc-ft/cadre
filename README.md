@@ -1,6 +1,10 @@
 <div align="center">
 
-# OpenBot
+# Cadre
+
+**A personal agent control plane: every agent gets a real computer of its own — a VM on your Mac or a box on your tailnet — and every action is decided by your policy before it happens and recorded after.**
+
+Cadre is a fork of [CopilotKit/OpenBot](https://github.com/CopilotKit/openbot) (MIT), extended with: Postgres-native threads (no hosted dependency), a versioned Supervisor Contract with slice budgets, an Apple `container` VM backend, a mesh of machines with governed agent migration, managed harnesses (Claude Code, Pi, OpenCode) governed by the same CEL boundaries, versioned artifacts, provider/model routing, and an egress proxy so model keys never enter a sandbox. See [docs/prd.md](docs/prd.md), [docs/roadmap.md](docs/roadmap.md) and [docs/using.md](docs/using.md).
 
 **AI coworkers you can hand real work to, and actually trust with the access.** Each gets a computer of its own: a real browser with its own logins, its own files, and only the tools you grant. Every action decided before it happens and recorded after.
 
