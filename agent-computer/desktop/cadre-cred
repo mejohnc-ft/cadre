@@ -1,0 +1,10 @@
+#!/bin/sh
+# Ask Cadre for a connection's sign-in credential. Cadre fetches it fresh from 1Password on the host
+# — approve it there (Touch ID) when prompted — and returns { username, password, otp } as JSON.
+# Usage: cadre-cred <connection-id>   e.g.  cadre-cred m365-admin
+CONN="$1"
+[ -z "$CONN" ] && { echo "usage: cadre-cred <connection-id>" >&2; exit 2; }
+SERVER="${SLICE_SERVER_URL:-http://192.168.64.1:3001}"
+TOKEN="${SLICE_COMPUTER_TOKEN:-$COMPUTER_TOKEN}"
+curl -s -H "x-openbot-computer-token: $TOKEN" "$SERVER/api/computer-cred/$CONN"
+echo

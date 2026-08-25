@@ -4,7 +4,7 @@ import { recordAuditEvent } from "../audit";
 import { decryptSecret, encryptSecret } from "../credentials";
 import type { Database } from "../db/client";
 import { connectionGrants, connections } from "../db/schema";
-import { opOtp, opPassword } from "./onepassword";
+import { opOtp, opPassword, opUsername } from "./onepassword";
 import { totpCode } from "./totp";
 
 /**
@@ -335,6 +335,48 @@ export function createConnectionStore(
       if (!row.totpEncrypted) return null;
       const seed = await decryptSecret(encryptionKey, row.totpEncrypted);
       return totpCode(seed);
+    },
+
+    /**
+     * The full credential a coworker needs to sign in, fetched fresh from 1Password on the host —
+     * username, password, and this minute's one-time code. This is the deliberate approval point:
+     * `op` runs here, prompting the operator's Touch ID when the vault is locked. The values are
+     * read once and never stored.
+     */
+    async opCredsOf(id: string): Promise<{
+      username: string | null;
+      password: string | null;
+      otp: string | null;
+    } | null> {
+      const [row] = await database
+        .select({
+          username: connections.username,
+          opRef: connections.opRef,
+          opAccount: connections.opAccount,
+        })
+        .from(connections)
+        .where(eq(connections.id, id))
+        .limit(1);
+      if (!row?.opRef) return null;
+      const account = row.opAccount ?? "";
+      const [username, password, otp] = await Promise.all([
+        row.username
+          ? Promise.resolve(row.username)
+          : opUsername(account, row.opRef),
+        opPassword(account, row.opRef).catch(() => null),
+        opOtp(account, row.opRef),
+      ]);
+      await recordAuditEvent(audit, {
+        eventType: "connection.secret_typed",
+        targetType: "connection",
+        targetId: id,
+        payload: {
+          connection: id,
+          via: "op-cred",
+          fields: "username,password,otp",
+        },
+      });
+      return { username, password, otp };
     },
 
     /** Seal a captured browser session onto the connection. The plaintext is never returned. */

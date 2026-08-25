@@ -43,7 +43,7 @@ RUN /root/.bun/bin/bun install --frozen-lockfile || /root/.bun/bin/bun install
 COPY agent-computer/ ./
 COPY agent-computer/hooks/ /opt/slice/
 COPY agent-computer/desktop/ /opt/desktop/
-RUN chmod +x /opt/desktop/*.sh || true
+RUN chmod +x /opt/desktop/*.sh /opt/desktop/cadre-cred 2>/dev/null || true; ln -sf /opt/desktop/cadre-cred /usr/local/bin/cadre-cred
 
 # noVNC (the live screen) on 6080, the agent server on 4100.
 EXPOSE 4100 6080

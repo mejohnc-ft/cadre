@@ -745,6 +745,36 @@ export function createApp(
     );
   }
 
+  /*
+   * The credential call a coworker's computer makes to sign in: it asks for a connection's
+   * username/password/one-time-code, the server fetches them fresh from 1Password on the host —
+   * which is the deliberate approval point, prompting the operator's Touch ID when the vault is
+   * locked — and hands them back over the computer token the VM already holds. A known, single step:
+   * the coworker asks, you approve, it gets the cred, it goes.
+   */
+  if (connections && harness?.computerToken) {
+    const computerToken = harness.computerToken;
+    app.get("/api/computer-cred/:connection", async (context) => {
+      const offered =
+        context.req.header("x-openbot-computer-token") ??
+        context.req.header("authorization")?.replace(/^Bearer\s+/i, "") ??
+        "";
+      if (offered !== computerToken) {
+        return context.json({ error: "Not a computer." }, 401);
+      }
+      const creds = await connections.opCredsOf(
+        context.req.param("connection"),
+      );
+      if (!creds) {
+        return context.json(
+          { error: "No such 1Password-backed connection." },
+          404,
+        );
+      }
+      return context.json(creds);
+    });
+  }
+
   if (connections) {
     app.route(
       "/api",
