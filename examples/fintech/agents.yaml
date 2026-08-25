@@ -25,20 +25,13 @@ agents:
   - id: incident-buddy
     name: Incident Buddy
     title: Service Desk
-    role_description: The service desk agent. Handles onboarding and incident tickets end to end — signs into admin portals in its own governed browser with vault connections, does the work, and writes the ticket. Every sign-in uses a granted connection typed by the server; every action is decided by the deployment's boundaries first.
+    role_description: The service desk agent. Handles onboarding and incident tickets end to end, driving a real browser with the Pi harness and agent-browser inside its own computer. Every action is decided by the deployment's boundaries first.
     avatar_seed: incident-buddy
-    # Built-in, not harness: this coworker drives the GOVERNED browser — computer_navigate,
-    # computer_snapshot, computer_type_secret — where the gateway decides and audits every action
-    # and injects vault credentials the coworker never sees. A harness coworker runs its own engine
-    # in its VM with its own tools and would not have that governed path.
-    type: built-in
-    system_prompt: >-
-      You are Incident Buddy, the service desk agent. You work in your own governed browser. To sign
-      into a portal, use computer_navigate to open it, computer_snapshot to see the fields, and
-      computer_type_secret naming a granted connection for any password or one-time code — never type
-      a password yourself and never guess one. Follow your attached playbook exactly. Verify what you
-      did before reporting it. If a step is refused by the boundaries, stop and say which step and
-      why; do not try another way around a refusal.
+    # Pi harness: Pi's agentic loop drives a real, visible Chrome via agent-browser (CDP). Cadre
+    # authenticates (host-side 1Password → captured session) and governs (the Pi tool hook); Pi does
+    # the work. This replaces the built-in loop, which was weaker at GUI execution.
+    type: harness
+    harness: pi
   - id: general-assistant
     name: General Assistant
     title: Everyday Work

@@ -198,6 +198,34 @@ export function createApp(
   app.get("/health", (context) => context.json({ status: "ok" }));
   // Projected, never the raw config: this endpoint is reachable by anyone. Add fields here
   // explicitly.
+  /*
+   * The live desktop for a coworker whose computer runs the desktop image: the noVNC URL, so the
+   * embed frame shows a real interactive desktop (working clipboard) instead of a screenshot poll.
+   * Local Apple-container path: the VM answers noVNC on its bridge IP at 6080, which the Mac reaches
+   * directly. A networked deployment would publish the port and return that instead.
+   */
+  app.get("/api/computers/:botId/novnc", async (context) => {
+    const botId = context.req.param("botId");
+    try {
+      const proc = Bun.spawn(["container", "list"], {
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const out = await new Response(proc.stdout).text();
+      await proc.exited;
+      const row = out
+        .split("\n")
+        .find((line) => line.includes(`slice-computer-${botId}`));
+      const ip = row?.match(/(\d+\.\d+\.\d+\.\d+)/)?.[1];
+      if (!ip) return context.json({ novnc: null }, 200);
+      return context.json({
+        novnc: `http://${ip}:6080/vnc.html?autoconnect=true&resize=scale`,
+      });
+    } catch {
+      return context.json({ novnc: null }, 200);
+    }
+  });
+
   app.get("/api/capabilities", async (context) =>
     context.json({
       mode: config.runtime.mode,

@@ -1,12 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { ComputerView } from "@/components/computer/computer-view";
 
 /**
- * A full-bleed live screen for one coworker, with no admin chrome, meant to be embedded in an
- * iframe by another app (the Service Toolbox investigation panel). It carries the same take-control
- * and secret-prompt affordances as the admin computer view, so a person watching the agent work can
- * step in. Public route — on a loopback single-user deployment the computer endpoints already answer
- * as the local admin; a networked deployment would gate this with an embed token.
+ * A full-bleed live screen for one coworker, embedded by another app (the Service Toolbox
+ * investigation panel). A desktop-image computer answers noVNC — a real, interactive desktop with a
+ * working clipboard — and we iframe that. A headless computer has no noVNC, so we fall back to the
+ * screenshot-based ComputerView. Public route; a networked deployment would gate it with a token.
  */
 export const Route = createFileRoute("/embed/computer/$botId")({
   component: EmbeddedComputer,
@@ -14,6 +14,41 @@ export const Route = createFileRoute("/embed/computer/$botId")({
 
 function EmbeddedComputer() {
   const { botId } = Route.useParams();
+  const [novnc, setNovnc] = useState<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    let live = true;
+    const check = async () => {
+      try {
+        const response = await fetch(
+          `/api/computers/${encodeURIComponent(botId)}/novnc`,
+        );
+        const body = (await response.json()) as { novnc: string | null };
+        if (live) setNovnc(body.novnc ?? null);
+      } catch {
+        if (live) setNovnc(null);
+      }
+    };
+    void check();
+    // The VM (and its IP) may still be starting; re-check for a while until noVNC appears.
+    const timer = setInterval(check, 4000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [botId]);
+
+  if (novnc) {
+    return (
+      <iframe
+        allow="clipboard-read; clipboard-write"
+        className="h-screen w-screen border-0"
+        src={novnc}
+        title={`${botId} desktop`}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen w-full bg-background p-2">
       <ComputerView computerId={botId} intervalMs={800} />
