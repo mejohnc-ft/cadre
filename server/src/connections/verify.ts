@@ -122,7 +122,7 @@ export function createConnectionVerifier(input: {
        * stay-signed-in button clicks it — that button is what makes the browser profile's cookies
        * long-lived, which is the whole reason future runs skip the password.
        */
-      for (let round = 0; round < 4; round++) {
+      for (let round = 0; round < 7; round++) {
         const snapshot = await gateway.snapshot(botId);
         const elements = snapshot.elements;
         const password = textbox(elements, PASSWORD_HINT);
@@ -198,13 +198,16 @@ export function createConnectionVerifier(input: {
             note: `The site refused the sign-in: ${firstMatch(after.text, FAILURE_HINT)}`,
           };
         }
-        const stillOnLogin = /sign.?in|log.?in/i.test(after.url);
-        if (!stillOnLogin || SUCCESS_HINT.test(after.text)) {
-          return {
-            status: "ok",
-            note: `Signed in; landed on ${after.url}`,
-          };
+        // Landed off the identity provider (e.g. admin.microsoft.com) = signed in.
+        const stillOnIdp =
+          /login\.microsoftonline\.com|login\.live|sign.?in|log.?in/i.test(
+            after.url,
+          );
+        if (!stillOnIdp || SUCCESS_HINT.test(after.text)) {
+          return { status: "ok", note: `Signed in; landed on ${after.url}` };
         }
+        // Still on the IdP with no field to fill and no error: likely a "Stay signed in?" or a
+        // consent screen — the next round's stay/submit handling advances it.
         // Still on a sign-in-looking page with no error text: loop once for a code page.
       }
       const last = await gateway.read(botId);

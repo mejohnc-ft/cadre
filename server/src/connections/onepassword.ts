@@ -66,20 +66,53 @@ export async function opPassword(
   return result.value;
 }
 
-/** The item's current one-time code, or null if it has no one-time-password field. */
+/**
+ * The item's current one-time code, or null if it has none. `op read` on the OTP field returns the
+ * otpauth URI, not the code — so this uses `op item get --otp`, which computes the live 6-digit code.
+ * The ref is `op://<vault>/<item>`; the item may be a name or an id.
+ */
 export async function opOtp(
   account: string,
   ref: string,
   serviceAccountToken?: string,
 ): Promise<string | null> {
-  const result = await opRead(
-    account,
-    ref,
-    "one-time password",
-    serviceAccountToken,
-  );
-  if (!result.ok) return null;
-  return result.value || null;
+  const match = /^op:\/\/([^/]+)\/([^/]+)/.exec(ref.trim());
+  if (!match) return null;
+  const [, vault, item] = match;
+  const env: Record<string, string> = { ...process.env } as Record<
+    string,
+    string
+  >;
+  const args = [
+    "item",
+    "get",
+    item as string,
+    "--vault",
+    vault as string,
+    "--otp",
+  ];
+  if (serviceAccountToken) {
+    env.OP_SERVICE_ACCOUNT_TOKEN = serviceAccountToken;
+  } else if (account) {
+    args.push("--account", account);
+  }
+  try {
+    const proc = Bun.spawn(["op", ...args], {
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [out, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      proc.exited,
+    ]);
+    if (code !== 0) return null;
+    const value = out.trim();
+    // Guard against an otpauth URI or empty output — a real code is short digits.
+    return /^[0-9]{4,10}$/.test(value) ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The item's username, or null. Not a secret, but convenient to source from the same item. */

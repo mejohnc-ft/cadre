@@ -236,7 +236,7 @@ export function createTriggerEngine(options: TriggerEngineOptions) {
       { id: crypto.randomUUID(), role: "user", content: prompt },
     ];
     let finalText = "";
-    for (let turn = 0; turn < 25; turn++) {
+    for (let turn = 0; turn < 45; turn++) {
       const { text, calls } = await runOnce(agentId, threadId, messages);
       if (text) finalText = text;
       if (calls.length === 0) break;
