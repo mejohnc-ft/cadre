@@ -1,0 +1,42 @@
+# A real desktop for the Bot's computer — the Grok-style experience, on arm64.
+#
+# Built on the Playwright image so the browser is the same arm64 Chromium the agent already drives
+# (Google Chrome ships no Linux arm64 build, which is why the headless image uses this base too).
+# Around it we add a real desktop: a virtual display (Xvfb), a light window manager with a dock
+# (openbox + tint2), a file manager (Thunar) and a terminal (xterm), all streamed to the browser
+# over noVNC. The agent's Chromium runs HEADED on that display, so it is the visible window the
+# person watches and can drive directly — copy and paste work because it is a real X11 clipboard,
+# not a keystroke relay.
+FROM mcr.microsoft.com/playwright:v1.62.1-noble
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV DISPLAY=:1
+ENV DISPLAY_NUM=1
+ENV WIDTH=1280
+ENV HEIGHT=800
+ENV IS_SANDBOX=1
+ENV COMPUTER_DESKTOP=1
+
+# The desktop, the apps, the VNC bridge. imagemagick/scrot are handy for the display; unzip is for bun.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      xvfb x11vnc xdotool scrot imagemagick \
+      openbox tint2 xterm thunar dbus-x11 \
+      python3 novnc websockify \
+      unzip curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Bun for the agent-computer server (same as the headless image).
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:${PATH}"
+
+WORKDIR /opt/agent-computer
+COPY agent-computer/package.json agent-computer/bun.lock ./
+RUN /root/.bun/bin/bun install --frozen-lockfile || /root/.bun/bin/bun install
+COPY agent-computer/ ./
+COPY agent-computer/desktop/ /opt/desktop/
+RUN chmod +x /opt/desktop/*.sh
+
+# noVNC (the live screen) on 6080, the agent server on 4100.
+EXPOSE 4100 6080
+
+CMD ["/opt/desktop/start.sh"]

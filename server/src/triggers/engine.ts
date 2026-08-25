@@ -187,6 +187,16 @@ export function createTriggerEngine(options: TriggerEngineOptions) {
     let status: "ok" | "error" = "ok";
     let reply = "";
     try {
+      // Take control back before the agent starts. A person watching the live screen may hold
+      // control (or a prior run left it held), which would refuse every action the agent tries.
+      await doFetch(
+        `${options.selfUrl}/api/computers/${encodeURIComponent(trigger.agentId)}/control/release`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        },
+      ).catch(() => undefined);
       reply = await runToCompletion(trigger.agentId, threadId, prompt);
     } catch (error) {
       status = "error";
@@ -236,7 +246,7 @@ export function createTriggerEngine(options: TriggerEngineOptions) {
       { id: crypto.randomUUID(), role: "user", content: prompt },
     ];
     let finalText = "";
-    for (let turn = 0; turn < 45; turn++) {
+    for (let turn = 0; turn < 60; turn++) {
       const { text, calls } = await runOnce(agentId, threadId, messages);
       if (text) finalText = text;
       if (calls.length === 0) break;

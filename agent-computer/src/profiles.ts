@@ -302,13 +302,21 @@ export function createProfiles(root: string) {
         const dir = directoryFor(botId);
         await sweepLocks(dir);
         const proxy = egressFor(botId, process.env);
+        // Desktop mode: launch a real, visible browser window on the X display so a person watching
+        // over noVNC sees it and can drive it with a working clipboard. The agent drives the same
+        // window. Headless (the default) stays the runtime for the streamed-screenshot image.
+        const desktop = process.env.COMPUTER_DESKTOP === "1";
         const context = await chromium.launchPersistentContext(dir, {
-          args: LAUNCH_ARGS,
+          headless: !desktop,
+          args: desktop
+            ? [...LAUNCH_ARGS, "--start-maximized", `--window-size=${VIEWPORT.width},${VIEWPORT.height}`]
+            : LAUNCH_ARGS,
           // Playwright adds `--no-sandbox` on its own unless told otherwise, so leaving this out
           // means the flag above decides nothing and a deployment that asked for the sandbox does
           // not get one. Verified by reading the launched process arguments, not by trusting either.
           chromiumSandbox: SANDBOX_ENABLED,
-          viewport: VIEWPORT,
+          // A headed window uses the real screen; a null viewport lets it fill the display.
+          viewport: desktop ? null : VIEWPORT,
           // This process owns shutdown. Playwright's signal handlers kill Chromium immediately on
           // SIGTERM, before pending cookie writes have time to flush.
           handleSIGTERM: false,
