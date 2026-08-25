@@ -30,11 +30,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:${PATH}"
 RUN bun add -g @mariozechner/pi-coding-agent opencode-ai @openai/codex \
-      agent-browser pi-agent-browser-native \
+      agent-browser \
     && ln -sf /root/.bun/bin/pi /usr/local/bin/pi \
     && ln -sf /root/.bun/bin/opencode /usr/local/bin/opencode || true
-# Enable the browser extension globally for Pi (best-effort; the harness also passes it explicitly).
-RUN pi install npm:pi-agent-browser-native 2>/dev/null || true
+# Pi drives the browser with the agent-browser CLI through its bash tool — no extension (the
+# published pi-agent-browser-native targets a different Pi fork). The CLI is version-matched and
+# maintains a CDP session across calls.
 
 WORKDIR /opt/agent-computer
 COPY agent-computer/package.json agent-computer/bun.lock ./
