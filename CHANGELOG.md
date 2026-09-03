@@ -8,6 +8,45 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The product is Cadre
+
+The fork grew its own product. Same deployment, same data; the name on the box is the change.
+
+### Connections: sign in once, the coworker reuses the session
+
+Connect is a named service tile, not a connection-CRUD maze. You sign in under supervision --
+Microsoft via device code, so no screencast and no password passes through Cadre -- and the
+captured session is what the agent reuses. Connect itself is idempotent now: stale control is
+released before connect-begin, so the second click works like the first.
+
+### Credentials live in a vault no coworker can read
+
+Connection secrets go to the host keychain, not the agent's world. 1Password is a known
+quantity: `op` runs on the host, the agent stays blind, and cadre-cred is an ask-and-approve --
+the agent requests, you approve, the credential returns and is not retained. A public
+placeholder key can no longer outrank a real keychain key.
+
+### Provider keys never enter a computer
+
+The egress boundary injects the provider credential on the way out, guarded by base-URL rules,
+so a computer can reach its model and never hold the key that paid for it.
+
+### Snapshots no longer echo secrets the server typed
+
+A snapshot taken while a credential was being entered used to replay what was typed. It
+doesn't.
+
+### Runs that start themselves, on a stack that survives restarts
+
+Triggers fire on their own and hand control over cleanly, and the stack now rides out reboots,
+crashes, and lost volumes without losing its threads.
+
+### The computer is a real desktop VM
+
+The runtime is a desktop VM with Pi at the keyboard driving the browser through agent-browser,
+not a browser extension pretending to be a desktop. Model routing, artifacts, and usage have
+their own pages, and the live screen can be embedded elsewhere with a CORS webhook.
+
 ## 0.0.4
 
 ### A click citing a ref this deployment cannot resolve is refused
