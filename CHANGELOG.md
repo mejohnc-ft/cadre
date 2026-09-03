@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.1.0
+
 ### The product is Cadre
 
 The fork grew its own product. Same deployment, same data; the name on the box is the change.
