@@ -1,4 +1,4 @@
-# OpenBot docs
+# Cadre docs
 
 Start with the root [README](../README.md), then use these references:
 

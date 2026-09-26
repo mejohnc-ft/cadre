@@ -1,0 +1,11 @@
+{
+  "ticketId": "CX-100427",
+  "source": "HaloPSA",
+  "type": "New user onboarding",
+  "priority": "P3",
+  "client": "Contoso",
+  "requestedBy": "IT Lead",
+  "summary": "Onboard demo standard user for Contoso",
+  "details": "Please create a standard Contoso demo user in Microsoft 365 per our standard build, and send the temporary credentials to it-lead@contoso.example via encrypted email.",
+  "notify": "it-lead@contoso.example"
+}

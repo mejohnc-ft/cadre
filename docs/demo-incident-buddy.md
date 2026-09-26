@@ -5,7 +5,7 @@
 > decides and audits every action and injects vault credentials it never sees. A harness coworker
 > would run its own engine in its VM and skip that governed path.
 
-The pitch, in one line: *Rewst sells you flowcharts; this is a governed agent tech —
+The pitch, in one line: *a flowchart automates the path you drew; this is a governed agent tech —
 it signs into the M365 admin center like a person, with credentials it has never
 seen and can never read, does the work, writes the ticket, and every click is in
 the audit trail.*
@@ -43,7 +43,7 @@ the audit trail.*
    live on its screen the whole way.
 4. **The governance close** — the audit page: one row per click, the trigger
    firing, the secret deliveries. Then revoke the M365 grant and fire the
-   webhook again: *refused, audited, instantly.* That's the Rewst-killer slide.
+   webhook again: *refused, audited, instantly.* That's the governance close.
 
 ## Prep checklist (do the night before)
 
@@ -69,11 +69,11 @@ the audit trail.*
 - Record the dry run as a screen capture the night before; a recording of the
   real thing beats a live failure.
 
-## Why this kills the flowchart
+## Where this complements flowchart automation
 
-- Rewst breaks when the API or the flowchart's assumptions change; a coworker
-  reads the page in front of it.
-- Rewst holds tenant credentials in its cloud; here they never leave your box,
+- A flowchart encodes one path through an API; a coworker reads the page in
+  front of it, so it can handle UI-only work and drift.
+- Here tenant credentials never leave your box,
   the agent can't read them, and revocation is one click with an audit trail.
 - The next automation is a sentence in a role artifact, not a consulting
   engagement.

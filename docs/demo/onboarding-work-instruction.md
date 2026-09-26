@@ -1,4 +1,4 @@
-# Work Instruction — Onboard a CentrexAI demo user and send encrypted credentials
+# Work Instruction — Onboard a Contoso demo user and send encrypted credentials
 
 You are Incident Buddy. Perform this end to end in your own governed browser. Verify each step
 before moving on. If a step is refused by the boundaries, stop and report exactly which step and why
@@ -8,14 +8,14 @@ before moving on. If a step is refused by the boundaries, stop and report exactl
 - Connection for sign-in: `m365-admin`
 - New user standard:
   - First name: Demo
-  - Last name: CentrexAI
-  - Display name: Demo CentrexAI
-  - Username (the part before @): `cai.demo` — pick the tenant's default `*.onmicrosoft.com` domain
+  - Last name: Contoso
+  - Display name: Demo Contoso
+  - Username (the part before @): `contoso.demo` — pick the tenant's default `*.onmicrosoft.com` domain
     from the domain dropdown
   - Usage location: United States
   - Password: let Microsoft auto-generate it, and require a change at first sign-in
   - Licensing/groups: none (a basic standard account)
-- Notify: JChristensen@centrexit.com, as an encrypted email
+- Notify: it-lead@contoso.example, as an encrypted email
 
 ## Steps
 1. **Sign in.** Use `computer_use_session` with connection `m365-admin` and open
@@ -28,9 +28,9 @@ before moving on. If a step is refused by the boundaries, stop and report exactl
    user to change their password when they first sign in" checked. Assign no license/groups (basic).
 4. **Finish and read back.** Complete the wizard. On the final screen Microsoft shows the new user's
    sign-in name and the temporary password — **copy both exactly**. Then confirm the account appears
-   in Active users (search for `cai.demo`). Do not report success until you have seen the account.
+   in Active users (search for `contoso.demo`). Do not report success until you have seen the account.
 5. **Compose the notification.** Open Outlook on the web at `https://outlook.office.com/mail/`.
-   Click "New mail". To: `JChristensen@centrexit.com`. Subject: `CentrexAI demo user — credentials`.
+   Click "New mail". To: `it-lead@contoso.example`. Subject: `Contoso demo user — credentials`.
    Body:
    - Display name and full sign-in name (UPN) of the new user
    - The temporary password
@@ -41,7 +41,7 @@ before moving on. If a step is refused by the boundaries, stop and report exactl
 7. **Send.** Send the email. Confirm it left the Drafts/appears in Sent.
 8. **Report.** Summarize: the user you created (display name + UPN), that a temporary password was
    set and requires change at first sign-in, that the credentials were sent encrypted to
-   JChristensen@centrexit.com, and anything a human still needs to do. Do not put the temporary
+   it-lead@contoso.example, and anything a human still needs to do. Do not put the temporary
    password in your report — say it was sent in the encrypted email.
 
 ## Rules

@@ -1,3 +1,5 @@
 #!/bin/sh
-# slice CLI shim. Uses the repo-pinned Bun.
-exec "/Users/mejohnc/.bun/bin/bun" "/Users/mejohnc/slice-dev/slice/cli/slice.ts" "$@"
+# Cadre CLI shim. Resolves the repo from this script's location and uses bun from PATH
+# (or $BUN); the repo pins Bun 1.3.x.
+here=$(cd "$(dirname "$0")/.." && pwd)
+exec "${BUN:-bun}" "$here/cli/slice.ts" "$@"
